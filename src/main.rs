@@ -1,7 +1,8 @@
 use axum::{routing::get, Router};
+use rumqttc::{MqttOptions, AsyncClient};
 use tower_http::{cors::CorsLayer, services::{ServeDir, ServeFile}};
 use tracing::info;
-use placenet_home::{routes, AppState};
+use placenet_home::{database, routes, AppState};
 
 #[tokio::main]
 async fn main() {
@@ -9,8 +10,8 @@ async fn main() {
 
     dotenvy::dotenv().ok();
 
-    let db_path = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "assets/placenet.db".to_string());
+    let db_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "sqlite:assets/placenet.db".to_string());
 
     let frontend_dir = std::env::var("FRONTEND_DIR")
         .unwrap_or_else(|_| "frontend/dist".to_string());
@@ -21,10 +22,40 @@ async fn main() {
     let port = std::env::var("SERVER_PORT")
         .unwrap_or_else(|_| "3000".to_string());
 
-    info!("Using database: {}", db_path);
+    let mqtt_host = std::env::var("MQTT_HOST")
+        .unwrap_or_else(|_| "localhost".to_string());
+
+    let mqtt_port: u16 = std::env::var("MQTT_PORT")
+        .unwrap_or_else(|_| "1883".to_string())
+        .parse()
+        .unwrap_or(1883);
+
+    let mqtt_client_id = std::env::var("MQTT_CLIENT_ID")
+        .unwrap_or_else(|_| "placenet-home".to_string());
+
+    info!("Using database: {}", db_url);
     info!("Serving frontend from: {}", frontend_dir);
 
-    let state = AppState { db_path };
+    let db = database::create_pool(&db_url).await
+        .expect("Failed to create database pool");
+
+    let mut mqtt_options = MqttOptions::new(mqtt_client_id, mqtt_host, mqtt_port);
+    mqtt_options.set_keep_alive(std::time::Duration::from_secs(30));
+
+    let (mqtt, mut eventloop) = AsyncClient::new(mqtt_options, 10);
+
+    tokio::spawn(async move {
+        loop {
+            match eventloop.poll().await {
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!("MQTT error: {}", e);
+                }
+            }
+        }
+    });
+
+    let state = AppState { db, mqtt };
 
     let api_routes = Router::new()
         .route("/health", get(routes::health));
