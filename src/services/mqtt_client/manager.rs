@@ -3,7 +3,7 @@ use tokio::sync::mpsc;
 use crate::config::MqttClientConfig;
 use crate::supervisor::Supervisor;
 use crate::services::ServiceId;
-use super::mosquitto_client::{
+use super::{
     MqttClientHandle, MqttClientService, MqttCommand, MqttMessage,
     MqttMessageReceiver, MqttOutboundSender,
 };

@@ -1,3 +1,5 @@
+pub mod manager;
+
 use async_trait::async_trait;
 use bytes::Bytes;
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};

@@ -2,8 +2,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, error};
 use placenet_home::config::Config;
-use placenet_home::services::mosquitto_brokerage_mngmt::{register_onto as register_mosquitto, start_mosquitto_brokerage};
-use placenet_home::services::mqtt_manager::register_onto as register_mqtt_client;
+use placenet_home::services::mqtt_brokerage::manager::{register_onto as register_mosquitto, start_mosquitto_brokerage};
+use placenet_home::services::mqtt_client::manager::register_onto as register_mqtt_client;
 use placenet_home::services::{self, ServiceId};
 use placenet_home::supervisor::Supervisor;
 

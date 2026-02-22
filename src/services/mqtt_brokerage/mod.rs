@@ -1,23 +1,24 @@
+pub mod manager;
+
 use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::process::{Child, Command};
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::RwLock;
-use tracing::{info, warn, error};
+use tracing::{info, error};
 
 use crate::config::MqttBrokerageConfig;
-use crate::supervisor::{ManagedService, Supervisor, SupervisorHandle};
-use crate::services::{ServiceCapabilities, ServiceId};
+use crate::supervisor::ManagedService;
 
 /// Manages a Mosquitto MQTT broker child process
-pub struct MosquittoService {
+pub struct MosquittoBrokerageService {
     binary_path: String,
     password_binary: Option<String>,
     config: Arc<RwLock<MqttBrokerageConfig>>,
     child: Option<Child>,
 }
 
-impl MosquittoService {
+impl MosquittoBrokerageService {
     pub fn new(
         binary_path: String,
         password_binary: Option<String>,
@@ -109,7 +110,7 @@ impl MosquittoService {
 }
 
 #[async_trait]
-impl ManagedService for MosquittoService {
+impl ManagedService for MosquittoBrokerageService {
     async fn start(&mut self) -> Result<u32, String> {
         if self.child.is_some() {
             return Err("Mosquitto is already running".to_string());
@@ -194,54 +195,5 @@ impl ManagedService for MosquittoService {
         } else {
             false
         }
-    }
-}
-
-/// Build and register `MosquittoService` onto the supervisor.
-///
-/// Returns whether mosquitto is available, so the caller can conditionally
-/// start the broker and dependent services.
-pub async fn register_onto(
-    supervisor: &mut Supervisor,
-    capabilities: &ServiceCapabilities,
-    mqtt_config: Arc<RwLock<MqttBrokerageConfig>>,
-) -> bool {
-    let available = capabilities.is_available("mosquitto");
-
-    if available {
-        if let Err(e) = mqtt_config.read().await.write_config(false).await {
-            error!("Failed to write mosquitto config: {}", e);
-        }
-    }
-
-    let service = MosquittoService::new(
-        capabilities.binary_path("mosquitto").unwrap_or("mosquitto").to_string(),
-        capabilities.binary_path("mosquitto_passwd").map(String::from),
-        mqtt_config,
-    );
-
-    supervisor.register(ServiceId::Mosquitto, Box::new(service), available);
-    available
-}
-
-/// Start the Mosquitto broker via the supervisor.
-pub async fn start_mosquitto_brokerage(
-    mosquitto_available: bool,
-    supervisor_handle: &SupervisorHandle,
-) {
-    if mosquitto_available {
-        match supervisor_handle.start_service(ServiceId::Mosquitto).await {
-            Ok(()) => {
-                info!("Mosquitto broker started");
-                // Brief delay to let the broker finish binding its port before
-                // the MQTT client service tries to connect.
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            }
-            Err(e) => {
-                error!("Failed to start Mosquitto: {}", e);
-            }
-        }
-    } else {
-        warn!("Mosquitto not installed — MQTT features disabled");
     }
 }

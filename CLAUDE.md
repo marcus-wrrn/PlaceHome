@@ -16,9 +16,12 @@ placenet-home/
     ├── services/
     │   ├── mod.rs
     │   ├── capabilities.rs
-    │   ├── mosquitto_brokerage_mngmt.rs
-    │   ├── mosquitto_client.rs
-    │   └── mqtt_manager.rs
+    │   ├── mqtt_brokerage/
+    │   │   ├── mod.rs                    ← MosquittoBrokerageService impl
+    │   │   └── registration.rs           ← registration only
+    │   └── mqtt_client/
+    │       ├── mod.rs                    ← MqttClientService impl
+    │       └── manager.rs                ← registration only
     └── rendering/
         ├── mod.rs
         └── startup_screen.rs
