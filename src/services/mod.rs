@@ -1,6 +1,7 @@
 pub mod capabilities;
 pub mod mosquitto_brokerage_mngmt;
 pub mod mosquitto_client;
+pub mod mqtt_manager;
 
 pub use capabilities::{detect_capabilities, ServiceCapabilities, BinaryInfo};
 
