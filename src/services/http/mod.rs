@@ -1,4 +1,5 @@
 pub mod manager;
+pub mod routes;
 
 use async_trait::async_trait;
 use axum::{Router, routing::get};
@@ -7,6 +8,7 @@ use tokio::sync::oneshot;
 use tracing::{error, info};
 
 use crate::config::HttpConfig;
+use crate::services::http;
 use crate::supervisor::ManagedService;
 
 pub struct HttpService {
@@ -18,10 +20,11 @@ impl HttpService {
     pub fn new(config: HttpConfig) -> Self {
         Self { config, shutdown_tx: None }
     }
-}
 
-async fn hello_world() -> &'static str {
-    "Hello World"
+    fn create_app(&self) -> Router {
+        Router::new()
+            .route("/", get(http::routes::hello_world))
+    }
 }
 
 #[async_trait]
@@ -32,15 +35,13 @@ impl ManagedService for HttpService {
         }
 
         let addr = format!("{}:{}", self.config.host, self.config.port);
-        let listener = TcpListener::bind(&addr)
-            .await
-            .map_err(|e| format!("Failed to bind HTTP listener on {}: {}", addr, e))?;
+        
+        let listener = TcpListener::bind(&addr).await
+        .map_err(|e| format!("Failed to bind HTTP listener on {}: {}", addr, e))?;
 
-        let local_addr = listener
-            .local_addr()
-            .map_err(|e| format!("Failed to get local address: {}", e))?;
+        let local_addr = listener.local_addr().map_err(|e| format!("Failed to get local address: {}", e))?;
 
-        let app = Router::new().route("/", get(hello_world));
+        let app = self.create_app();
 
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
         self.shutdown_tx = Some(shutdown_tx);
