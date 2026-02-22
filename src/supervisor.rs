@@ -24,17 +24,14 @@ pub enum ServiceStatus {
 
 /// Commands sent to the supervisor via channel
 pub enum SupervisorCommand {
-    /// Start a managed service
     Start {
         service: ServiceId,
         reply: oneshot::Sender<Result<(), String>>,
     },
-    /// Stop a managed service
     Stop {
         service: ServiceId,
         reply: oneshot::Sender<Result<(), String>>,
     },
-    /// Restart a managed service
     Restart {
         service: ServiceId,
         reply: oneshot::Sender<Result<(), String>>,
@@ -92,13 +89,10 @@ impl SupervisorHandle {
 /// Trait for a managed child process
 #[async_trait]
 pub trait ManagedService {
-    /// Spawn the service, returning its PID
+    /// Spawn the service, returns its PID
     async fn start(&mut self) -> Result<u32, String>;
-
-    /// Stop the service gracefully
+    /// Stop the service safely
     async fn stop(&mut self) -> Result<(), String>;
-
-    /// Check if the process is still alive
     async fn is_running(&mut self) -> bool;
 }
 
