@@ -26,7 +26,8 @@ async fn main() {
         .unwrap_or_else(|_| "config".to_string());
 
     // ── Service detection ────────────────────────────────────────────
-    let capabilities = services::detect_capabilities().await;
+    let required_binaries = ["mosquitto", "mosquitto_passwd"];
+    let capabilities = services::detect_capabilities(&required_binaries).await;
 
     // ── Build supervisor ─────────────────────────────────────────────
     let mut supervisor = Supervisor::new();

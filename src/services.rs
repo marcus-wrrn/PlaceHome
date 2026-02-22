@@ -3,7 +3,10 @@ use serde::Serialize;
 use tokio::process::Command;
 use tracing::{info, warn};
 
-/// Identifiers for all managed services
+/// Identifiers for all managed services.
+///
+/// Used as keys when referencing services throughout the process manager
+/// and any associated state maps.
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ServiceId {
@@ -11,16 +14,24 @@ pub enum ServiceId {
     MqttClient,
 }
 
-/// Information about a detected binary
+/// Metadata about a binary discovered on the host system.
+///
+/// Produced by [`detect_binary`] and stored inside [`ServiceCapabilities`].
 #[derive(Debug, Clone)]
 pub struct BinaryInfo {
     pub path: String,
     pub version: Option<String>,
 }
 
-/// Results of startup service detection
+/// A snapshot of which required binaries are available on the host system.
+///
+/// Built once at startup via [`detect_capabilities`] and then passed
+/// read-only to anything that needs to know whether a dependency is
+/// present before attempting to launch it.
 #[derive(Debug, Clone)]
 pub struct ServiceCapabilities {
+    /// Map from binary name (e.g. `"mosquitto"`) to its detected info,
+    /// or `None` if the binary was not found.
     pub binaries: HashMap<String, Option<BinaryInfo>>,
 }
 
@@ -39,7 +50,10 @@ impl ServiceCapabilities {
     }
 }
 
-/// Check if a binary exists on the system and get its path
+/// Checks whether `name` exists on `$PATH` via `which` and collects its
+/// version string.
+///
+/// Returns `None` if the binary cannot be located.
 async fn detect_binary(name: &str) -> Option<BinaryInfo> {
     let output = Command::new("which")
         .arg(name)
@@ -73,13 +87,17 @@ async fn detect_binary(name: &str) -> Option<BinaryInfo> {
     Some(BinaryInfo { path, version })
 }
 
-/// Probe the system for all required binaries at startup
-pub async fn detect_capabilities() -> ServiceCapabilities {
-    let required_binaries = ["mosquitto", "mosquitto_passwd"];
+/// Probes the host system for all required binaries and returns a
+/// [`ServiceCapabilities`] snapshot.
+///
+/// This should be called once during application startup. Each binary is
+/// located with `which` and its version string is collected via
+/// `--version`. Results are logged at `INFO` (found) or `WARN` (missing).
+pub async fn detect_capabilities(required_binaries: &[&str]) -> ServiceCapabilities {
 
     let mut binaries = HashMap::new();
 
-    for name in &required_binaries {
+    for name in required_binaries {
         let info = detect_binary(name).await;
         match &info {
             Some(bi) => {
