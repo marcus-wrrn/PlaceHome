@@ -36,7 +36,6 @@ pub enum SupervisorCommand {
         service: ServiceId,
         reply: oneshot::Sender<Result<(), String>>,
     },
-    /// Get status of all services
     Status {
         reply: oneshot::Sender<HashMap<ServiceId, ServiceStatus>>,
     },

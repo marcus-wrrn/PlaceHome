@@ -1,7 +1,8 @@
 use tokio::sync::mpsc;
+use tracing::{info, warn, error};
 
 use crate::config::MqttClientConfig;
-use crate::supervisor::Supervisor;
+use crate::supervisor::{Supervisor, SupervisorHandle};
 use crate::services::ServiceId;
 use super::{
     MqttClientHandle, MqttClientService, MqttCommand, MqttMessage,
@@ -63,4 +64,19 @@ pub fn register_onto(
 
     supervisor.register(ServiceId::MqttClient, Box::new(manager.service), available);
     handles
+}
+
+/// Start the MQTT client service via the supervisor.
+pub async fn start_mqtt_client(
+    mosquitto_available: bool,
+    supervisor_handle: &SupervisorHandle,
+) {
+    if mosquitto_available {
+        match supervisor_handle.start_service(ServiceId::MqttClient).await {
+            Ok(()) => info!("MQTT client started"),
+            Err(e) => error!("Failed to start MQTT client service: {}", e),
+        }
+    } else {
+        warn!("Mosquitto not available — skipping MQTT client start");
+    }
 }
