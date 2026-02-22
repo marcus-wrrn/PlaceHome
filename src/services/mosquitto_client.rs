@@ -1,9 +1,48 @@
 use async_trait::async_trait;
+use bytes::Bytes;
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, warn};
 
 use crate::supervisor::ManagedService;
+
+// ── Message type ──────────────────────────────────────────────────────────────
+
+/// A message received from the MQTT broker.
+#[derive(Debug, Clone)]
+pub struct MqttMessage {
+    pub topic: String,
+    pub payload: Bytes,
+}
+
+// ── Message queue ─────────────────────────────────────────────────────────────
+
+/// Capacity of the inbound and outbound message queues.
+const MSG_QUEUE_CAPACITY: usize = 64;
+
+/// Sending half of the inbound message queue (eventloop → main task).
+///
+/// Held inside [`MqttClientService`]; messages are pushed here as they
+/// arrive from the broker.
+pub type MqttMessageSender = mpsc::Sender<MqttMessage>;
+
+/// Receiving half of the inbound message queue (eventloop → main task).
+///
+/// Returned by [`MqttClientService::message_receiver`] and passed to the
+/// main task so it can drain incoming broker messages in its run loop.
+pub type MqttMessageReceiver = mpsc::Receiver<MqttMessage>;
+
+/// Sending half of the outbound message queue (main task → eventloop).
+///
+/// Returned by [`MqttClientService::outbound_sender`] and held by the
+/// main task to enqueue messages that should be published to the broker.
+pub type MqttOutboundSender = mpsc::Sender<MqttMessage>;
+
+/// Receiving half of the outbound message queue (main task → eventloop).
+///
+/// Held inside [`MqttClientService`]; the eventloop drains this queue and
+/// publishes each message via the rumqttc client.
+pub type MqttOutboundReceiver = mpsc::Receiver<MqttMessage>;
 
 pub enum MqttCommand {
     Subscribe {
@@ -89,16 +128,30 @@ pub struct MqttClientService {
     cmd_tx: mpsc::Sender<MqttCommand>,
     cmd_rx: Option<mpsc::Receiver<MqttCommand>>,
     shutdown_tx: Option<oneshot::Sender<()>>,
+    /// Inbound queue tx — pushed by the eventloop, read by the main task.
+    msg_tx: MqttMessageSender,
+    /// Inbound queue rx — handed to the main task via [`message_receiver`].
+    msg_rx: Option<MqttMessageReceiver>,
+    /// Outbound queue tx — handed to the main task via [`outbound_sender`].
+    out_tx: MqttOutboundSender,
+    /// Outbound queue rx — drained by the eventloop to publish messages.
+    out_rx: Option<MqttOutboundReceiver>,
 }
 
 impl MqttClientService {
     pub fn new(config: MqttClientConfig) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel(64);
+        let (msg_tx, msg_rx) = mpsc::channel(MSG_QUEUE_CAPACITY);
+        let (out_tx, out_rx) = mpsc::channel(MSG_QUEUE_CAPACITY);
         Self {
             config,
             cmd_tx,
             cmd_rx: Some(cmd_rx),
             shutdown_tx: None,
+            msg_tx,
+            msg_rx: Some(msg_rx),
+            out_tx,
+            out_rx: Some(out_rx),
         }
     }
 
@@ -107,6 +160,22 @@ impl MqttClientService {
     /// is running.
     pub fn handle(&self) -> MqttClientHandle {
         MqttClientHandle { tx: self.cmd_tx.clone() }
+    }
+
+    /// Returns the receiving end of the inbound message queue.
+    ///
+    /// Call this once before `start()` and pass the receiver to the main task.
+    /// Panics if called more than once.
+    pub fn message_receiver(&mut self) -> MqttMessageReceiver {
+        self.msg_rx.take().expect("message_receiver already taken")
+    }
+
+    /// Returns the sending end of the outbound message queue.
+    ///
+    /// Call this once before `start()` and keep it in the main task to push
+    /// messages that should be published to the broker.
+    pub fn outbound_sender(&self) -> MqttOutboundSender {
+        self.out_tx.clone()
     }
 }
 
@@ -122,6 +191,12 @@ impl ManagedService for MqttClientService {
             .take()
             .ok_or("MqttClientService command receiver already consumed")?;
 
+        let msg_tx = self.msg_tx.clone();
+        let mut out_rx = self
+            .out_rx
+            .take()
+            .ok_or("MqttClientService outbound receiver already consumed")?;
+
         let mut opts = MqttOptions::new(&self.config.client_id, &self.config.host, self.config.port);
         opts.set_keep_alive(std::time::Duration::from_secs(30));
 
@@ -131,7 +206,8 @@ impl ManagedService for MqttClientService {
         self.shutdown_tx = Some(shutdown_tx);
 
         // ── Eventloop task ───────────────────────────────────────────────────
-        // Drives the rumqttc eventloop and dispatches incoming publishes.
+        // Drives the rumqttc eventloop, pushes inbound broker messages onto
+        // the inbound queue, and publishes messages from the outbound queue.
         let client_clone = client.clone();
         tokio::spawn(async move {
             loop {
@@ -141,15 +217,29 @@ impl ManagedService for MqttClientService {
                         let _ = client_clone.disconnect().await;
                         break;
                     }
+                    // Drain outbound queue: publish messages queued by the main task.
+                    Some(msg) = out_rx.recv() => {
+                        if let Err(e) = client_clone
+                            .publish(&msg.topic, QoS::AtLeastOnce, false, msg.payload)
+                            .await
+                        {
+                            error!(topic = %msg.topic, error = %e, "MQTT outbound publish failed");
+                        }
+                    }
                     poll = eventloop.poll() => {
                         match poll {
                             Ok(Event::Incoming(Packet::Publish(publish))) => {
-                                // TODO: replace with real dispatch when handlers are added
-                                info!(
-                                    topic = %publish.topic,
-                                    bytes = publish.payload.len(),
-                                    "MQTT message received"
-                                );
+                                let msg = MqttMessage {
+                                    topic: publish.topic.clone(),
+                                    payload: publish.payload.clone(),
+                                };
+                                if let Err(e) = msg_tx.send(msg).await {
+                                    error!(
+                                        topic = %publish.topic,
+                                        "MQTT inbound queue full or closed: {}",
+                                        e
+                                    );
+                                }
                             }
                             Ok(Event::Incoming(Packet::ConnAck(_))) => {
                                 info!("MQTT client connected to broker");
