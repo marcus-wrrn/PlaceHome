@@ -1,4 +1,6 @@
+use std::sync::Arc;
 use rumqttc::{AsyncClient, MqttOptions};
+use tokio::sync::RwLock;
 use tracing::{info, warn, error};
 use placenet_home::config::Config;
 use placenet_home::services::mosquitto::MosquittoService;
@@ -27,16 +29,17 @@ async fn main() {
             .unwrap_or("mosquitto")
             .to_string();
     let password_binary = capabilities.binary_path("mosquitto_passwd").map(String::from);
-    let mosquitto_config_dir = config.config_dir.join("mosquitto");
+
+    let mqtt_config = Arc::new(RwLock::new(config.mqtt));
 
     let mosquitto_service = MosquittoService::new(
         binary_path,
         password_binary,
-        mosquitto_config_dir,
+        Arc::clone(&mqtt_config),
     );
 
     if mosquitto_available {
-        if let Err(e) = mosquitto_service.write_config(config.mqtt.port, false).await {
+        if let Err(e) = mqtt_config.read().await.write_config(false).await {
             error!("Failed to write mosquitto config: {}", e);
         }
     }
@@ -57,7 +60,11 @@ async fn main() {
 
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-                match connect_mqtt_client(&config.mqtt.client_id, config.mqtt.port).await {
+                let (client_id, port) = {
+                    let cfg = mqtt_config.read().await;
+                    (cfg.client_id.clone(), cfg.port)
+                };
+                match connect_mqtt_client(&client_id, port).await {
                     Ok(client) => Some(client),
                     Err(e) => {
                         error!("Failed to connect MQTT client: {}", e);
