@@ -1,9 +1,9 @@
 use rumqttc::{AsyncClient, MqttOptions};
 use tracing::{info, warn, error};
+use placenet_home::config::Config;
 use placenet_home::mosquitto::MosquittoService;
 use placenet_home::services::{self, ServiceId};
 use placenet_home::supervisor::{Supervisor};
-use std::path::PathBuf;
 
 #[tokio::main]
 async fn main() {
@@ -11,17 +11,7 @@ async fn main() {
 
     dotenvy::dotenv().ok();
 
-    // ── Environment config ───────────────────────────────────────────
-    let mqtt_port: u16 = std::env::var("MQTT_PORT")
-        .unwrap_or_else(|_| "1883".to_string())
-        .parse()
-        .unwrap_or(1883);
-
-    let mqtt_client_id = std::env::var("MQTT_CLIENT_ID")
-        .unwrap_or_else(|_| "placenet-home".to_string());
-
-    let config_dir = std::env::var("PLACENET_CONFIG_DIR")
-        .unwrap_or_else(|_| "config".to_string());
+    let config = Config::from_env();
 
     // ── Service detection ────────────────────────────────────────────
     let required_binaries = ["mosquitto", "mosquitto_passwd"];
@@ -37,7 +27,7 @@ async fn main() {
             .unwrap_or("mosquitto")
             .to_string();
     let password_binary = capabilities.binary_path("mosquitto_passwd").map(String::from);
-    let mosquitto_config_dir = PathBuf::from(&config_dir).join("mosquitto");
+    let mosquitto_config_dir = config.config_dir.join("mosquitto");
 
     let mosquitto_service = MosquittoService::new(
         binary_path,
@@ -46,7 +36,7 @@ async fn main() {
     );
 
     if mosquitto_available {
-        if let Err(e) = mosquitto_service.write_config(mqtt_port, false).await {
+        if let Err(e) = mosquitto_service.write_config(config.mqtt.port, false).await {
             error!("Failed to write mosquitto config: {}", e);
         }
     }
@@ -67,7 +57,7 @@ async fn main() {
 
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-                match connect_mqtt_client(&mqtt_client_id, mqtt_port).await {
+                match connect_mqtt_client(&config.mqtt.client_id, config.mqtt.port).await {
                     Ok(client) => Some(client),
                     Err(e) => {
                         error!("Failed to connect MQTT client: {}", e);
