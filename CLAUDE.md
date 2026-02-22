@@ -12,9 +12,10 @@ placenet-home/
     ├── main.rs
     ├── lib.rs
     ├── config.rs
-    ├── mosquitto.rs
-    ├── services.rs
     ├── supervisor.rs
+    ├── services/
+    │   ├── mod.rs
+    │   └── mosquitto.rs
     └── rendering/
         ├── mod.rs
         └── startup_screen.rs

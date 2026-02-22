@@ -1,7 +1,7 @@
 use rumqttc::{AsyncClient, MqttOptions};
 use tracing::{info, warn, error};
 use placenet_home::config::Config;
-use placenet_home::mosquitto::MosquittoService;
+use placenet_home::services::mosquitto::MosquittoService;
 use placenet_home::services::{self, ServiceId};
 use placenet_home::supervisor::{Supervisor};
 

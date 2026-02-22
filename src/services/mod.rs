@@ -1,3 +1,5 @@
+pub mod mosquitto;
+
 use std::collections::HashMap;
 use serde::Serialize;
 use tokio::process::Command;
