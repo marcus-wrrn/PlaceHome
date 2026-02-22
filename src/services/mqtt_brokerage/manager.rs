@@ -18,17 +18,29 @@ pub async fn register_onto(
 ) -> bool {
     let available = capabilities.is_available("mosquitto");
 
-    if available {
-        if let Err(e) = mqtt_config.read().await.write_config(false).await {
-            error!("Failed to write mosquitto config: {}", e);
-        }
-    }
-
     let service = MosquittoBrokerageService::new(
         capabilities.binary_path("mosquitto").unwrap_or("mosquitto").to_string(),
         capabilities.binary_path("mosquitto_passwd").map(String::from),
-        mqtt_config,
+        Arc::clone(&mqtt_config),
     );
+
+    if available {
+        let config = mqtt_config.read().await;
+        if let Err(e) = config.write_config().await {
+            error!("Failed to write mosquitto config: {}", e);
+        }
+
+        // Create the initial user in the password file before the broker starts.
+        let username = config.username.clone();
+        let password = config.password.clone();
+        drop(config);
+
+        if let Err(e) = service.set_password(&username, &password).await {
+            error!("Failed to set MQTT user password: {}", e);
+        } else {
+            info!("MQTT user '{}' configured", username);
+        }
+    }
 
     supervisor.register(ServiceId::Mosquitto, Box::new(service), available);
     available

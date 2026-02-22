@@ -2,7 +2,7 @@ pub mod manager;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
+use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS, Transport};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, warn};
 
@@ -135,6 +135,14 @@ impl ManagedService for MqttClientService {
 
         let mut opts = MqttOptions::new(&self.config.client_id, &self.config.host, self.config.port);
         opts.set_keep_alive(std::time::Duration::from_secs(30));
+        opts.set_credentials(&self.config.username, &self.config.password);
+
+        if self.config.tls_enabled {
+            let ca = tokio::fs::read(&self.config.cafile)
+                .await
+                .map_err(|e| format!("Failed to read CA cert '{}': {}", self.config.cafile.display(), e))?;
+            opts.set_transport(Transport::tls(ca, None, None));
+        }
 
         let (client, mut eventloop) = AsyncClient::new(opts, 10);
 
