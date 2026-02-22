@@ -2,7 +2,7 @@ pub mod manager;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS, Transport};
+use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, QoS, Transport};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, warn};
 
@@ -45,6 +45,8 @@ pub struct MqttClientHandle {
 }
 
 impl MqttClientHandle {
+    /// Sends a subscribe request to the MQTT client for the given topic and QoS level.
+    /// Waits for acknowledgement from the client task before returning.
     pub async fn subscribe(&self, topic: impl Into<String>, qos: QoS) -> Result<(), String> {
         let (reply, rx) = oneshot::channel();
         self.tx
@@ -54,6 +56,8 @@ impl MqttClientHandle {
         rx.await.map_err(|_| "mqtt client dropped reply".to_string())?
     }
 
+    /// Sends an unsubscribe request to the MQTT client for the given topic.
+    /// Waits for acknowledgement from the client task before returning.
     pub async fn unsubscribe(&self, topic: impl Into<String>) -> Result<(), String> {
         let (reply, rx) = oneshot::channel();
         self.tx
@@ -63,6 +67,8 @@ impl MqttClientHandle {
         rx.await.map_err(|_| "mqtt client dropped reply".to_string())?
     }
 
+    /// Sends a publish request to the MQTT client for the given topic, QoS level, and payload.
+    /// Waits for acknowledgement from the client task before returning.
     pub async fn publish(
         &self,
         topic: impl Into<String>,
@@ -93,6 +99,8 @@ pub struct MqttClientService {
 }
 
 impl MqttClientService {
+    /// Creates a new `MqttClientService` with the provided configuration and pre-constructed
+    /// channel endpoints. The service is not started until [`ManagedService::start`] is called.
     pub fn new(
         config: MqttClientConfig,
         cmd_tx: mpsc::Sender<MqttCommand>,
@@ -110,56 +118,69 @@ impl MqttClientService {
         }
     }
 
+    /// Returns a cloneable [`MqttClientHandle`] that can be used to send commands to this service.
     pub fn handle(&self) -> MqttClientHandle {
         MqttClientHandle { tx: self.cmd_tx.clone() }
     }
-}
 
-#[async_trait]
-impl ManagedService for MqttClientService {
-    async fn start(&mut self) -> Result<u32, String> {
-        if self.shutdown_tx.is_some() {
-            return Err("MqttClientService is already running".to_string());
-        }
-
+    /// Consumes the command and outbound receivers from their `Option` fields.
+    /// Returns an error if either receiver has already been taken (i.e. the service was
+    /// previously started and the receivers were already moved into the spawned tasks).
+    fn take_channels(
+        &mut self,
+    ) -> Result<(mpsc::Receiver<MqttCommand>, MqttOutboundReceiver), String> {
         let cmd_rx = self
             .cmd_rx
             .take()
             .ok_or("MqttClientService command receiver already consumed")?;
-
-        let msg_tx = self.msg_tx.clone();
-        let mut out_rx = self
+        let out_rx = self
             .out_rx
             .take()
             .ok_or("MqttClientService outbound receiver already consumed")?;
+        Ok((cmd_rx, out_rx))
+    }
 
-        let mut opts = MqttOptions::new(&self.config.client_id, &self.config.host, self.config.port);
+    /// Constructs [`MqttOptions`] from the service configuration.
+    /// Sets the keep-alive interval and credentials, and conditionally reads the CA certificate
+    /// from disk and configures a TLS transport when `tls_enabled` is set in the config.
+    async fn build_mqtt_opts(&self) -> Result<MqttOptions, String> {
+        let mut opts =
+            MqttOptions::new(&self.config.client_id, &self.config.host, self.config.port);
         opts.set_keep_alive(std::time::Duration::from_secs(30));
         opts.set_credentials(&self.config.username, &self.config.password);
 
         if self.config.tls_enabled {
-            let ca = tokio::fs::read(&self.config.cafile)
-                .await
-                .map_err(|e| format!("Failed to read CA cert '{}': {}", self.config.cafile.display(), e))?;
+            let ca = tokio::fs::read(&self.config.cafile).await.map_err(|e| {
+                format!("Failed to read CA cert '{}': {}", self.config.cafile.display(), e)
+            })?;
             opts.set_transport(Transport::tls(ca, None, None));
         }
 
-        let (client, mut eventloop) = AsyncClient::new(opts, 10);
+        Ok(opts)
+    }
 
-        let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
-        self.shutdown_tx = Some(shutdown_tx);
-
-        let client_clone = client.clone();
+    /// Spawns the eventloop task responsible for driving the rumqttc event loop.
+    /// The task multiplexes three concurrent concerns via `tokio::select!`:
+    /// - Shutdown signal: disconnects cleanly and exits.
+    /// - Outbound messages: publishes messages received from `out_rx` to the broker.
+    /// - Inbound events: forwards incoming `Publish` packets to `msg_tx` for downstream consumers.
+    fn spawn_eventloop_task(
+        client: AsyncClient,
+        mut eventloop: EventLoop,
+        mut out_rx: MqttOutboundReceiver,
+        msg_tx: MqttMessageSender,
+        mut shutdown_rx: oneshot::Receiver<()>,
+    ) {
         tokio::spawn(async move {
             loop {
                 tokio::select! {
                     _ = &mut shutdown_rx => {
                         info!("MQTT client eventloop shutting down");
-                        let _ = client_clone.disconnect().await;
+                        let _ = client.disconnect().await;
                         break;
                     }
                     Some(msg) = out_rx.recv() => {
-                        if let Err(e) = client_clone
+                        if let Err(e) = client
                             .publish(&msg.topic, QoS::AtLeastOnce, false, msg.payload)
                             .await
                         {
@@ -197,9 +218,13 @@ impl ManagedService for MqttClientService {
                 }
             }
         });
+    }
 
+    /// Spawns the command task that processes [`MqttCommand`] messages from the handle channel.
+    /// Handles subscribe, unsubscribe, and publish requests, sending results back via the
+    /// oneshot reply channels. Exits when the channel is closed or a `Shutdown` command is received.
+    fn spawn_command_task(client: AsyncClient, mut cmd_rx: mpsc::Receiver<MqttCommand>) {
         tokio::spawn(async move {
-            let mut cmd_rx = cmd_rx;
             while let Some(cmd) = cmd_rx.recv().await {
                 match cmd {
                     MqttCommand::Subscribe { topic, qos, reply } => {
@@ -238,10 +263,36 @@ impl ManagedService for MqttClientService {
                 }
             }
         });
+    }
+}
+
+#[async_trait]
+impl ManagedService for MqttClientService {
+    /// Starts the MQTT client service by building connection options, creating the rumqttc client,
+    /// and spawning the eventloop and command handler tasks. Returns an error if the service is
+    /// already running or if channel receivers have been previously consumed.
+    async fn start(&mut self) -> Result<u32, String> {
+        if self.shutdown_tx.is_some() {
+            return Err("MqttClientService is already running".to_string());
+        }
+
+        let (cmd_rx, out_rx) = self.take_channels()?;
+        let msg_tx = self.msg_tx.clone();
+
+        let opts = self.build_mqtt_opts().await?;
+        let (client, eventloop) = AsyncClient::new(opts, 10);
+
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        self.shutdown_tx = Some(shutdown_tx);
+
+        Self::spawn_eventloop_task(client.clone(), eventloop, out_rx, msg_tx, shutdown_rx);
+        Self::spawn_command_task(client, cmd_rx);
 
         Ok(0)
     }
 
+    /// Signals the eventloop task to disconnect from the broker and shut down.
+    /// Returns an error if the service is not currently running.
     async fn stop(&mut self) -> Result<(), String> {
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
@@ -251,6 +302,7 @@ impl ManagedService for MqttClientService {
         }
     }
 
+    /// Returns `true` if the service is currently running (i.e. the shutdown sender is still held).
     async fn is_running(&mut self) -> bool {
         self.shutdown_tx.is_some()
     }
