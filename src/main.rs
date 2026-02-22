@@ -1,10 +1,19 @@
 use rumqttc::{AsyncClient, MqttOptions};
 use tracing::{info, warn, error};
 
-use placenet_home::mosquitto::MosquittoService;
-use placenet_home::services::{self, ServiceId};
-use placenet_home::supervisor::Supervisor;
+use crossterm::{
+    event::{self, Event, KeyCode},
+    terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
+    ExecutableCommand,
+};
+use ratatui::{backend::CrosstermBackend, Terminal};
 
+use placenet_home::mosquitto::MosquittoService;
+use placenet_home::rendering::startup_screen::StartupScreen;
+use placenet_home::services::{self, ServiceId};
+use placenet_home::supervisor::{ServiceStatus, Supervisor, SupervisorHandle};
+
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[tokio::main]
@@ -33,14 +42,17 @@ async fn main() {
     let mut supervisor = Supervisor::new();
 
     let mosquitto_available = capabilities.is_available("mosquitto");
+
+    let binary_path = capabilities
+            .binary_path("mosquitto")
+            .unwrap_or("mosquitto")
+            .to_string();
+    let password_binary = capabilities.binary_path("mosquitto_passwd").map(String::from);
     let mosquitto_config_dir = PathBuf::from(&config_dir).join("mosquitto");
 
     let mosquitto_service = MosquittoService::new(
-        capabilities
-            .binary_path("mosquitto")
-            .unwrap_or("mosquitto")
-            .to_string(),
-        capabilities.binary_path("mosquitto_passwd").map(String::from),
+        binary_path,
+        password_binary,
         mosquitto_config_dir,
     );
 
@@ -57,6 +69,11 @@ async fn main() {
     );
 
     let supervisor_handle = supervisor.spawn();
+
+    // ── Show startup screen ───────────────────────────────────────────
+    if let Err(e) = show_startup_screen(&supervisor_handle).await {
+        error!("Startup screen error: {}", e);
+    }
 
     // ── Start Mosquitto broker ───────────────────────────────────────
     let _mqtt_client: Option<AsyncClient> = if mosquitto_available {
@@ -87,6 +104,54 @@ async fn main() {
     // Keep running until interrupted
     tokio::signal::ctrl_c().await.ok();
     info!("Shutting down");
+}
+
+/// Display the startup screen in the terminal and wait for Enter.
+async fn show_startup_screen(handle: &SupervisorHandle) -> Result<(), String> {
+    let statuses = handle.get_status().await?;
+
+    // Enter raw mode + alternate screen (blocking terminal ops)
+    terminal::enable_raw_mode().map_err(|e| e.to_string())?;
+    std::io::stdout()
+        .execute(EnterAlternateScreen)
+        .map_err(|e| e.to_string())?;
+
+    let backend = CrosstermBackend::new(std::io::stdout());
+    let mut terminal = Terminal::new(backend).map_err(|e| e.to_string())?;
+
+    let screen = StartupScreen::new();
+
+    let result = render_and_wait(&mut terminal, &screen, &statuses).await;
+
+    // Always restore the terminal
+    terminal::disable_raw_mode().ok();
+    std::io::stdout().execute(LeaveAlternateScreen).ok();
+
+    result
+}
+
+/// Render loop: draw the startup screen and poll for Enter key.
+async fn render_and_wait(
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    screen: &StartupScreen,
+    statuses: &HashMap<ServiceId, ServiceStatus>,
+) -> Result<(), String> {
+    loop {
+        terminal
+            .draw(|frame| {
+                screen.render(frame.area(), frame.buffer_mut(), statuses);
+            })
+            .map_err(|e| e.to_string())?;
+
+        // Block (synchronously within the async context) until a key event
+        if event::poll(std::time::Duration::from_millis(100)).map_err(|e| e.to_string())? {
+            if let Event::Key(key) = event::read().map_err(|e| e.to_string())? {
+                if key.code == KeyCode::Enter {
+                    return Ok(());
+                }
+            }
+        }
+    }
 }
 
 /// Connect the rumqttc async client to the local broker

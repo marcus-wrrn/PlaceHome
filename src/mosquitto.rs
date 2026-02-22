@@ -9,16 +9,16 @@ use crate::supervisor::ManagedService;
 /// Manages a Mosquitto MQTT broker child process
 pub struct MosquittoService {
     binary_path: String,
-    passwd_binary: Option<String>,
+    password_binary: Option<String>,
     config_dir: PathBuf,
     child: Option<Child>,
 }
 
 impl MosquittoService {
-    pub fn new(binary_path: String, passwd_binary: Option<String>, config_dir: PathBuf) -> Self {
+    pub fn new(binary_path: String, password_binary: Option<String>, config_dir: PathBuf) -> Self {
         Self {
             binary_path,
-            passwd_binary,
+            password_binary,
             config_dir,
             child: None,
         }
@@ -64,12 +64,10 @@ impl MosquittoService {
 
     /// Add or update a user's password using mosquitto_passwd
     pub async fn set_password(&self, username: &str, password: &str) -> Result<(), String> {
-        let passwd_bin = self.passwd_binary.as_deref()
+        let passwd_bin = self.password_binary.as_deref()
             .ok_or_else(|| "mosquitto_passwd is not installed".to_string())?;
 
         let password_file = self.config_dir.join("passwd");
-
-        // Create the file if it doesn't exist
         if !password_file.exists() {
             // -c creates a new file, -b reads password from command line
             let output = Command::new(passwd_bin)
@@ -112,7 +110,7 @@ impl MosquittoService {
 
     /// Delete a user from the password file
     pub async fn delete_user(&self, username: &str) -> Result<(), String> {
-        let passwd_bin = self.passwd_binary.as_deref()
+        let passwd_bin = self.password_binary.as_deref()
             .ok_or_else(|| "mosquitto_passwd is not installed".to_string())?;
 
         let password_file = self.config_dir.join("passwd");
