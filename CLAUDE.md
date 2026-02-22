@@ -15,7 +15,8 @@ placenet-home/
     ├── supervisor.rs
     ├── services/
     │   ├── mod.rs
-    │   └── mosquitto.rs
+    │   ├── mosquitto.rs
+    │   └── mosquitto_client.rs
     └── rendering/
         ├── mod.rs
         └── startup_screen.rs

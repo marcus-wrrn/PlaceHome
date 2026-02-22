@@ -1,4 +1,5 @@
-pub mod mosquitto;
+pub mod mosquitto_brokerage_mngmt;
+pub mod mosquitto_client;
 
 use std::collections::HashMap;
 use serde::Serialize;

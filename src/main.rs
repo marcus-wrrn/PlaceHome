@@ -1,9 +1,9 @@
 use std::sync::Arc;
-use rumqttc::{AsyncClient, MqttOptions};
 use tokio::sync::RwLock;
-use tracing::{info, warn, error};
-use placenet_home::config::Config;
-use placenet_home::services::mosquitto::MosquittoService;
+use tracing::{info, error};
+use placenet_home::config::{Config};
+use placenet_home::services::mosquitto_brokerage_mngmt::{MosquittoService, start_mosquitto_brokerage};
+use placenet_home::services::mosquitto_client::{MqttClientConfig, MqttClientService};
 use placenet_home::services::{self, ServiceId};
 use placenet_home::supervisor::{Supervisor};
 
@@ -50,64 +50,37 @@ async fn main() {
         mosquitto_available,
     );
 
+    // ── Build MQTT client service ────────────────────────────────────
+    let (mqtt_client_config_id, mqtt_client_port) = {
+        let cfg = mqtt_config.read().await;
+        (cfg.client_id.clone(), cfg.port)
+    };
+    let mqtt_client_service = MqttClientService::new(MqttClientConfig {
+        client_id: mqtt_client_config_id,
+        host: "localhost".to_string(),
+        port: mqtt_client_port,
+    });
+    let _mqtt_client_handle = mqtt_client_service.handle();
+
+    supervisor.register(
+        ServiceId::MqttClient,
+        Box::new(mqtt_client_service),
+        mosquitto_available,
+    );
+
     let supervisor_handle = supervisor.spawn();
 
     // ── Start Mosquitto broker ───────────────────────────────────────
-    let _mqtt_client: Option<AsyncClient> = if mosquitto_available {
-        match supervisor_handle.start_service(ServiceId::Mosquitto).await {
-            Ok(()) => {
-                info!("Mosquitto broker started, connecting MQTT client...");
+    start_mosquitto_brokerage(mosquitto_available, &supervisor_handle).await;
 
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-                let (client_id, port) = {
-                    let cfg = mqtt_config.read().await;
-                    (cfg.client_id.clone(), cfg.port)
-                };
-                match connect_mqtt_client(&client_id, port).await {
-                    Ok(client) => Some(client),
-                    Err(e) => {
-                        error!("Failed to connect MQTT client: {}", e);
-                        None
-                    }
-                }
-            }
-            Err(e) => {
-                error!("Failed to start Mosquitto: {}", e);
-                None
-            }
+    // ── Start MQTT client ────────────────────────────────────────────
+    if mosquitto_available {
+        if let Err(e) = supervisor_handle.start_service(ServiceId::MqttClient).await {
+            error!("Failed to start MQTT client service: {}", e);
         }
-    } else {
-        warn!("Mosquitto not installed — MQTT features disabled");
-        None
-    };
+    }
 
     // Keep running until interrupted
     tokio::signal::ctrl_c().await.ok();
     info!("Shutting down");
-}
-
-/// Connect the rumqttc async client to the local broker
-async fn connect_mqtt_client(
-    client_id: &str,
-    port: u16,
-) -> Result<AsyncClient, String> {
-    let mut opts = MqttOptions::new(client_id, "localhost", port);
-    opts.set_keep_alive(std::time::Duration::from_secs(30));
-
-    let (client, mut eventloop) = AsyncClient::new(opts, 10);
-
-    tokio::spawn(async move {
-        loop {
-            match eventloop.poll().await {
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::error!("MQTT client error: {}", e);
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                }
-            }
-        }
-    });
-
-    Ok(client)
 }

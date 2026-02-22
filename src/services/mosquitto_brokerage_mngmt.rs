@@ -3,10 +3,11 @@ use async_trait::async_trait;
 use tokio::process::{Child, Command};
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::RwLock;
-use tracing::{info, error};
+use tracing::{info, warn, error};
 
 use crate::config::MqttConfig;
-use crate::supervisor::ManagedService;
+use crate::supervisor::{ManagedService, SupervisorHandle};
+use crate::services::ServiceId;
 
 /// Manages a Mosquitto MQTT broker child process
 pub struct MosquittoService {
@@ -193,5 +194,27 @@ impl ManagedService for MosquittoService {
         } else {
             false
         }
+    }
+}
+
+/// Start the Mosquitto broker via the supervisor.
+pub async fn start_mosquitto_brokerage(
+    mosquitto_available: bool,
+    supervisor_handle: &SupervisorHandle,
+) {
+    if mosquitto_available {
+        match supervisor_handle.start_service(ServiceId::Mosquitto).await {
+            Ok(()) => {
+                info!("Mosquitto broker started");
+                // Brief delay to let the broker finish binding its port before
+                // the MQTT client service tries to connect.
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            }
+            Err(e) => {
+                error!("Failed to start Mosquitto: {}", e);
+            }
+        }
+    } else {
+        warn!("Mosquitto not installed — MQTT features disabled");
     }
 }
