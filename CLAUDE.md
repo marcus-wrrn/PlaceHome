@@ -16,6 +16,9 @@ placenet-home/
     ├── services/
     │   ├── mod.rs
     │   ├── capabilities.rs
+    │   ├── http/
+    │   │   ├── mod.rs                    ← HttpService impl
+    │   │   └── manager.rs                ← registration only
     │   ├── mqtt_brokerage/
     │   │   ├── mod.rs                    ← MosquittoBrokerageService impl
     │   │   └── registration.rs           ← registration only

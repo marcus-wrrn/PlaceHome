@@ -1,4 +1,5 @@
 pub mod capabilities;
+pub mod http;
 pub mod mqtt_brokerage;
 pub mod mqtt_client;
 
@@ -13,6 +14,7 @@ use serde::Serialize;
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ServiceId {
+    Http,
     Mosquitto,
     MqttClient,
 }

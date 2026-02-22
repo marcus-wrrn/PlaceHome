@@ -77,9 +77,26 @@ impl MqttBrokerageConfig {
     }
 }
 
+pub struct HttpConfig {
+    pub host: String,
+    pub port: u16,
+}
+
+impl HttpConfig {
+    fn from_env() -> Self {
+        let host = std::env::var("HTTP_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
+        let port: u16 = std::env::var("HTTP_PORT")
+            .unwrap_or_else(|_| "8080".to_string())
+            .parse()
+            .unwrap_or(8080);
+        Self { host, port }
+    }
+}
+
 pub struct Config {
     pub mqtt_brokerage: MqttBrokerageConfig,
     pub mqtt_client: MqttClientConfig,
+    pub http: HttpConfig,
     pub config_dir: PathBuf,
 }
 
@@ -91,6 +108,7 @@ impl Config {
         );
         let mqtt_brokerage = MqttBrokerageConfig::from_env(&config_dir);
         let mqtt_client = MqttClientConfig::from_env();
-        Self { mqtt_brokerage, mqtt_client, config_dir }
+        let http = HttpConfig::from_env();
+        Self { mqtt_brokerage, mqtt_client, http, config_dir }
     }
 }
