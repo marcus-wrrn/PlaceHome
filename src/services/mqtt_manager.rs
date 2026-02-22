@@ -1,7 +1,10 @@
 use tokio::sync::mpsc;
 
+use crate::config::MqttClientConfig;
+use crate::supervisor::Supervisor;
+use crate::services::ServiceId;
 use super::mosquitto_client::{
-    MqttClientConfig, MqttClientHandle, MqttClientService, MqttCommand, MqttMessage,
+    MqttClientHandle, MqttClientService, MqttCommand, MqttMessage,
     MqttMessageReceiver, MqttOutboundSender,
 };
 
@@ -13,6 +16,13 @@ pub struct MqttManager {
     pub inbound_rx: MqttMessageReceiver,
     pub outbound_tx: MqttOutboundSender,
     pub service: MqttClientService,
+}
+
+/// Handles returned to the caller after registering the MQTT client service.
+pub struct MqttManagerHandles {
+    pub handle: MqttClientHandle,
+    pub inbound_rx: MqttMessageReceiver,
+    pub outbound_tx: MqttOutboundSender,
 }
 
 impl MqttManager {
@@ -31,4 +41,26 @@ impl MqttManager {
             service,
         }
     }
+}
+
+/// Build and register the MQTT client service onto the supervisor.
+///
+/// `available` should match the availability of the broker this client
+/// connects to (e.g. `mosquitto_available`). Returns the channel handles
+/// the caller needs to interact with the MQTT client.
+pub fn register_onto(
+    supervisor: &mut Supervisor,
+    config: MqttClientConfig,
+    available: bool,
+) -> MqttManagerHandles {
+    let manager = MqttManager::new(config);
+
+    let handles = MqttManagerHandles {
+        handle: manager.handle.clone(),
+        inbound_rx: manager.inbound_rx,
+        outbound_tx: manager.outbound_tx,
+    };
+
+    supervisor.register(ServiceId::MqttClient, Box::new(manager.service), available);
+    handles
 }

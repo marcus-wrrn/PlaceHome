@@ -5,15 +5,15 @@ use tokio::io::AsyncBufReadExt;
 use tokio::sync::RwLock;
 use tracing::{info, warn, error};
 
-use crate::config::MqttConfig;
-use crate::supervisor::{ManagedService, SupervisorHandle};
-use crate::services::ServiceId;
+use crate::config::MqttBrokerageConfig;
+use crate::supervisor::{ManagedService, Supervisor, SupervisorHandle};
+use crate::services::{ServiceCapabilities, ServiceId};
 
 /// Manages a Mosquitto MQTT broker child process
 pub struct MosquittoService {
     binary_path: String,
     password_binary: Option<String>,
-    config: Arc<RwLock<MqttConfig>>,
+    config: Arc<RwLock<MqttBrokerageConfig>>,
     child: Option<Child>,
 }
 
@@ -21,7 +21,7 @@ impl MosquittoService {
     pub fn new(
         binary_path: String,
         password_binary: Option<String>,
-        config: Arc<RwLock<MqttConfig>>,
+        config: Arc<RwLock<MqttBrokerageConfig>>,
     ) -> Self {
         Self {
             binary_path,
@@ -195,6 +195,33 @@ impl ManagedService for MosquittoService {
             false
         }
     }
+}
+
+/// Build and register `MosquittoService` onto the supervisor.
+///
+/// Returns whether mosquitto is available, so the caller can conditionally
+/// start the broker and dependent services.
+pub async fn register_onto(
+    supervisor: &mut Supervisor,
+    capabilities: &ServiceCapabilities,
+    mqtt_config: Arc<RwLock<MqttBrokerageConfig>>,
+) -> bool {
+    let available = capabilities.is_available("mosquitto");
+
+    if available {
+        if let Err(e) = mqtt_config.read().await.write_config(false).await {
+            error!("Failed to write mosquitto config: {}", e);
+        }
+    }
+
+    let service = MosquittoService::new(
+        capabilities.binary_path("mosquitto").unwrap_or("mosquitto").to_string(),
+        capabilities.binary_path("mosquitto_passwd").map(String::from),
+        mqtt_config,
+    );
+
+    supervisor.register(ServiceId::Mosquitto, Box::new(service), available);
+    available
 }
 
 /// Start the Mosquitto broker via the supervisor.

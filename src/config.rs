@@ -1,14 +1,34 @@
 use std::path::PathBuf;
 use tracing::info;
 
-pub struct MqttConfig {
+pub struct MqttClientConfig {
+    pub client_id: String,
+    pub host: String,
+    pub port: u16,
+}
+
+impl MqttClientConfig {
+    fn from_env() -> Self {
+        let client_id = std::env::var("MQTT_CLIENT_ID")
+            .unwrap_or_else(|_| "placenet-home".to_string());
+        let host = "localhost".to_string();
+        let port: u16 = std::env::var("MQTT_PORT")
+            .unwrap_or_else(|_| "1883".to_string())
+            .parse()
+            .unwrap_or(1883);
+
+        Self { client_id, host, port}
+    }
+}
+
+pub struct MqttBrokerageConfig {
     pub port: u16,
     pub client_id: String,
     pub config_file: PathBuf,
     pub password_file: PathBuf,
 }
 
-impl MqttConfig {
+impl MqttBrokerageConfig {
     fn from_env(config_dir: &PathBuf) -> Self {
         let port: u16 = std::env::var("MQTT_PORT")
             .unwrap_or_else(|_| "1883".to_string())
@@ -58,7 +78,8 @@ impl MqttConfig {
 }
 
 pub struct Config {
-    pub mqtt: MqttConfig,
+    pub mqtt_brokerage: MqttBrokerageConfig,
+    pub mqtt_client: MqttClientConfig,
     pub config_dir: PathBuf,
 }
 
@@ -68,7 +89,8 @@ impl Config {
         let config_dir = PathBuf::from(
             std::env::var("PLACENET_CONFIG_DIR").unwrap_or_else(|_| "config".to_string()),
         );
-        let mqtt = MqttConfig::from_env(&config_dir);
-        Self { mqtt, config_dir }
+        let mqtt_brokerage = MqttBrokerageConfig::from_env(&config_dir);
+        let mqtt_client = MqttClientConfig::from_env();
+        Self { mqtt_brokerage, mqtt_client, config_dir }
     }
 }

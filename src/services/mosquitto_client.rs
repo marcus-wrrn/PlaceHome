@@ -4,6 +4,7 @@ use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, warn};
 
+use crate::config::MqttClientConfig;
 use crate::supervisor::ManagedService;
 
 #[derive(Debug, Clone)]
@@ -78,12 +79,6 @@ impl MqttClientHandle {
             .map_err(|_| "mqtt client channel closed".to_string())?;
         rx.await.map_err(|_| "mqtt client dropped reply".to_string())?
     }
-}
-
-pub struct MqttClientConfig {
-    pub client_id: String,
-    pub host: String,
-    pub port: u16,
 }
 
 pub struct MqttClientService {
