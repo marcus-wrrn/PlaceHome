@@ -29,6 +29,13 @@ async fn parse_device_info(body: Body) -> Result<DeviceInfo, Response> {
     })
 }
 
+/// `GET /health`
+///
+/// Simple liveness probe to confirm the HTTPS server is reachable.
+pub async fn health() -> impl IntoResponse {
+    (StatusCode::OK, "Hello, World!")
+}
+
 /// `POST /`
 ///
 /// Expects the `X-PlaceNet-Init: <version>` header and a JSON body
