@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use rustls;
 use tokio::sync::RwLock;
 use tracing::info;
 use placenet_home::config::Config;
@@ -11,6 +12,9 @@ use placenet_home::supervisor::Supervisor;
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install ring CryptoProvider");
     dotenvy::dotenv().ok();
 
     let config = Config::from_env();
