@@ -1,8 +1,9 @@
+pub mod handshake;
 pub mod manager;
 pub mod routes;
 
 use async_trait::async_trait;
-use axum::{Router, routing::get};
+use axum::{Router, routing::post};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tracing::{error, info};
@@ -23,7 +24,7 @@ impl HttpService {
 
     fn create_app(&self) -> Router {
         Router::new()
-            .route("/", get(http::routes::hello_world))
+            .route("/", post(http::routes::init_device))
     }
 }
 
