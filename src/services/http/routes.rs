@@ -6,7 +6,7 @@ use axum::{
 };
 use tracing::{error, info, warn};
 
-use super::handshake::{DeviceInfo, initiate_tls_handshake};
+use super::handshake::DeviceInfo;
 
 const PLACENET_INIT_HEADER: &str = "x-placenet-init";
 const SUPPORTED_VERSION: &str = "0.0.1";
@@ -31,7 +31,7 @@ async fn parse_device_info(body: Body) -> Result<DeviceInfo, Response> {
 
 /// `GET /health`
 ///
-/// Simple liveness probe to confirm the HTTPS server is reachable.
+/// Simple liveness probe to confirm the HTTP server is reachable.
 pub async fn health() -> impl IntoResponse {
     (StatusCode::OK, "Hello, World!")
 }
@@ -39,8 +39,8 @@ pub async fn health() -> impl IntoResponse {
 /// `POST /`
 ///
 /// Expects the `X-PlaceNet-Init: <version>` header and a JSON body
-/// matching [`DeviceInfo`].  On success the server initiates a TLS
-/// handshake back to the device.
+/// matching [`DeviceInfo`].  On success the device address and mDNS
+/// hostname are logged and a 200 OK is returned.
 pub async fn init_device(request: Request) -> impl IntoResponse {
     // ── 1. Validate the protocol-version header ──────────────────────────
     let version = match request.headers().get(PLACENET_INIT_HEADER) {
@@ -83,22 +83,9 @@ pub async fn init_device(request: Request) -> impl IntoResponse {
     info!(
         address = %device.address,
         mdns_hostname = %device.mdns.hostname,
-        "Device registration received, initiating TLS handshake"
+        mdns_port = device.mdns.port,
+        "Device verified"
     );
 
-    // ── 3. Initiate TLS handshake ────────────────────────────────────────
-    match initiate_tls_handshake(&device).await {
-        Ok(_tls_stream) => {
-            info!(address = %device.address, "Secure channel established");
-            (StatusCode::OK, "Secure channel established").into_response()
-        }
-        Err(e) => {
-            error!("Failed to establish secure channel with {}: {}", device.address, e);
-            (
-                StatusCode::BAD_GATEWAY,
-                format!("Could not establish secure channel: {}", e),
-            )
-                .into_response()
-        }
-    }
+    (StatusCode::OK, "Device verified").into_response()
 }
