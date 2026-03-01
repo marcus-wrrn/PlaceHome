@@ -11,21 +11,24 @@ use tracing::{error, info};
 use crate::config::HttpConfig;
 use crate::services::http;
 use crate::supervisor::ManagedService;
+use handshake::MqttBrokerageInfo;
 
 pub struct HttpService {
     config: HttpConfig,
+    brokerage_info: MqttBrokerageInfo,
     shutdown_tx: Option<oneshot::Sender<()>>,
 }
 
 impl HttpService {
-    pub fn new(config: HttpConfig) -> Self {
-        Self { config, shutdown_tx: None }
+    pub fn new(config: HttpConfig, brokerage_info: MqttBrokerageInfo) -> Self {
+        Self { config, brokerage_info, shutdown_tx: None }
     }
 
     fn create_app(&self) -> Router {
         Router::new()
             .route("/", post(http::routes::init_device))
             .route("/health", get(http::routes::health))
+            .with_state(self.brokerage_info.clone())
     }
 }
 

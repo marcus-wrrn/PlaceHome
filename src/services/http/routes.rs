@@ -1,12 +1,13 @@
 use axum::{
+    Json,
     body::Body,
-    extract::Request,
+    extract::{Request, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
 use tracing::{error, info, warn};
 
-use super::handshake::DeviceInfo;
+use super::handshake::{DeviceInfo, MqttBrokerageInfo};
 
 const PLACENET_INIT_HEADER: &str = "x-placenet-init";
 const SUPPORTED_VERSION: &str = "0.0.1";
@@ -39,9 +40,12 @@ pub async fn health() -> impl IntoResponse {
 /// `POST /`
 ///
 /// Expects the `X-PlaceNet-Init: <version>` header and a JSON body
-/// matching [`DeviceInfo`].  On success the device address and mDNS
-/// hostname are logged and a 200 OK is returned.
-pub async fn init_device(request: Request) -> impl IntoResponse {
+/// matching [`DeviceInfo`].  On success the device is given MQTT brokerage
+/// information (address, port, topics) as a JSON response.
+pub async fn init_device(
+    State(brokerage): State<MqttBrokerageInfo>,
+    request: Request,
+) -> impl IntoResponse {
     // ── 1. Validate the protocol-version header ──────────────────────────
     let version = match request.headers().get(PLACENET_INIT_HEADER) {
         Some(v) => match v.to_str() {
@@ -84,8 +88,9 @@ pub async fn init_device(request: Request) -> impl IntoResponse {
         address = %device.address,
         mdns_hostname = %device.mdns.hostname,
         mdns_port = device.mdns.port,
-        "Device verified"
+        "Device verified — sending brokerage info"
     );
 
-    (StatusCode::OK, "Device verified").into_response()
+    // ── 3. Return MQTT brokerage information ─────────────────────────────
+    (StatusCode::OK, Json(brokerage)).into_response()
 }
