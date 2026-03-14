@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use axum::{Router, routing::{get, post}};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
+use tower_http::services::ServeDir;
 use tracing::{error, info};
 
 use crate::config::HttpConfig;
@@ -28,6 +29,7 @@ impl HttpService {
         Router::new()
             .route("/", post(http::routes::init_device))
             .route("/health", get(http::routes::health))
+            .nest_service("/static", ServeDir::new("static"))
             .with_state(self.brokerage_info.clone())
     }
 }

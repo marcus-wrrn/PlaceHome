@@ -8,6 +8,8 @@ placenet-home/
 ├── Cargo.lock
 ├── .env
 ├── migrations/
+├── static/                           ← served at GET /static/*
+│   └── index.html
 └── src/
     ├── main.rs
     ├── lib.rs
@@ -21,6 +23,10 @@ placenet-home/
     │   │   ├── manager.rs                ← registration only
     │   │   ├── routes.rs                 ← route handlers (POST /)
     │   │   └── handshake.rs              ← DeviceInfo struct + TLS handshake logic
+    │   ├── ca/
+    │   │   ├── mod.rs                    ← CaService impl + init/sign_csr
+    │   │   ├── manager.rs                ← registration only
+    │   │   └── operations.rs             ← root CA generation, CSR signing logic
     │   ├── mqtt_brokerage/
     │   │   ├── mod.rs                    ← MosquittoBrokerageService impl
     │   │   └── registration.rs           ← registration only
