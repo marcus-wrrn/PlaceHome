@@ -5,7 +5,7 @@ use tracing::info;
 use placenet_home::config::Config;
 use placenet_home::services::mqtt_brokerage::manager::{register_onto as register_mqtt_broker, start_mosquitto_brokerage};
 use placenet_home::services::mqtt_client::manager::{register_onto as register_mqtt_client, start_mqtt_client};
-use placenet_home::services::ca::manager::register as register_ca;
+use placenet_home::infra::ca::manager::register as register_ca;
 use placenet_home::services::http::manager::{register_onto as register_http_server, start_http};
 use placenet_home::services::http::handshake::build_brokerage_info;
 use placenet_home::services;

@@ -15,6 +15,12 @@ placenet-home/
     ├── lib.rs
     ├── config.rs
     ├── supervisor.rs
+    ├── infra/
+    │   ├── mod.rs
+    │   └── ca/
+    │       ├── mod.rs                    ← CaService impl + init/sign_csr
+    │       ├── manager.rs                ← registration only
+    │       └── operations.rs             ← root CA generation, CSR signing logic
     ├── services/
     │   ├── mod.rs
     │   ├── capabilities.rs
@@ -23,10 +29,6 @@ placenet-home/
     │   │   ├── manager.rs                ← registration only
     │   │   ├── routes.rs                 ← route handlers (POST /)
     │   │   └── handshake.rs              ← DeviceInfo struct + TLS handshake logic
-    │   ├── ca/
-    │   │   ├── mod.rs                    ← CaService impl + init/sign_csr
-    │   │   ├── manager.rs                ← registration only
-    │   │   └── operations.rs             ← root CA generation, CSR signing logic
     │   ├── mqtt_brokerage/
     │   │   ├── mod.rs                    ← MosquittoBrokerageService impl
     │   │   └── registration.rs           ← registration only

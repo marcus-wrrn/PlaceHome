@@ -1,4 +1,3 @@
-pub mod ca;
 pub mod capabilities;
 pub mod http;
 pub mod mqtt_brokerage;
