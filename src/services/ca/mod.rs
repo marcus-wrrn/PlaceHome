@@ -2,6 +2,7 @@ pub mod manager;
 pub mod operations;
 
 use std::sync::Arc;
+use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 use tracing::info;
 
@@ -20,10 +21,15 @@ impl CaService {
         }
     }
 
-    /// Initialise the CA: load from disk if certificates exist, otherwise
-    /// generate a new root CA and persist it.
-    pub async fn init(&self) -> Result<(), String> {
-        let ca_state = operations::load_or_generate_ca().await?;
+    /// Initialise the CA: run migrations, load from database if a CA exists,
+    /// otherwise generate a new root CA and persist it.
+    pub async fn init(&self, pool: &SqlitePool) -> Result<(), String> {
+        sqlx::migrate!("./migrations")
+            .run(pool)
+            .await
+            .map_err(|e| format!("Failed to run CA migrations: {}", e))?;
+
+        let ca_state = operations::load_or_generate_ca(pool).await?;
         info!("CA ready (CN={})", ca_state.subject_cn);
         *self.state.write().await = Some(ca_state);
         Ok(())

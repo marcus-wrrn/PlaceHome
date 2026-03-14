@@ -1,13 +1,10 @@
-use std::path::Path;
 use rcgen::{
     Certificate, CertificateParams, CertificateSigningRequestParams,
     DistinguishedName, DnType, IsCa, KeyPair, KeyUsagePurpose,
 };
-use tokio::fs;
+use sqlx::SqlitePool;
 use tracing::info;
 
-const CA_CERT_PATH: &str = "certs/ca.crt";
-const CA_KEY_PATH: &str = "certs/ca.key";
 const CA_CN: &str = "PlaceNet Root CA";
 
 /// Live CA state held in memory after initialisation.
@@ -17,24 +14,28 @@ pub struct CaState {
     pub key_pair: KeyPair,
 }
 
-/// Load an existing CA from disk, or generate a new one and persist it.
-pub async fn load_or_generate_ca() -> Result<CaState, String> {
-    if Path::new(CA_CERT_PATH).exists() && Path::new(CA_KEY_PATH).exists() {
-        info!("Loading existing CA from {}", CA_CERT_PATH);
-        load_ca_from_disk().await
+/// Load an existing CA from the database, or generate a new one and persist it.
+pub async fn load_or_generate_ca(pool: &SqlitePool) -> Result<CaState, String> {
+    if let Some(state) = load_ca_from_db(pool).await? {
+        info!("Loading existing CA from database");
+        Ok(state)
     } else {
         info!("No CA found — generating new root CA");
-        generate_and_persist_ca().await
+        generate_and_persist_ca(pool).await
     }
 }
 
-async fn load_ca_from_disk() -> Result<CaState, String> {
-    let cert_pem = fs::read_to_string(CA_CERT_PATH)
-        .await
-        .map_err(|e| format!("Failed to read {}: {}", CA_CERT_PATH, e))?;
-    let key_pem = fs::read_to_string(CA_KEY_PATH)
-        .await
-        .map_err(|e| format!("Failed to read {}: {}", CA_KEY_PATH, e))?;
+async fn load_ca_from_db(pool: &SqlitePool) -> Result<Option<CaState>, String> {
+    let row: Option<(String, String)> = sqlx::query_as(
+        "SELECT cert_pem, key_pem FROM ca_keys WHERE id = 1",
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("Failed to query CA from database: {}", e))?;
+
+    let Some((cert_pem, key_pem)) = row else {
+        return Ok(None);
+    };
 
     let key_pair = KeyPair::from_pem(&key_pem)
         .map_err(|e| format!("Failed to parse CA private key: {}", e))?;
@@ -44,14 +45,10 @@ async fn load_ca_from_disk() -> Result<CaState, String> {
         .self_signed(&key_pair)
         .map_err(|e| format!("Failed to reconstruct CA cert: {}", e))?;
 
-    Ok(CaState { subject_cn: CA_CN.to_string(), cert, key_pair })
+    Ok(Some(CaState { subject_cn: CA_CN.to_string(), cert, key_pair }))
 }
 
-async fn generate_and_persist_ca() -> Result<CaState, String> {
-    fs::create_dir_all("certs")
-        .await
-        .map_err(|e| format!("Failed to create certs/ directory: {}", e))?;
-
+async fn generate_and_persist_ca(pool: &SqlitePool) -> Result<CaState, String> {
     let key_pair = KeyPair::generate()
         .map_err(|e| format!("Failed to generate CA key pair: {}", e))?;
 
@@ -74,14 +71,14 @@ async fn generate_and_persist_ca() -> Result<CaState, String> {
     let cert_pem = cert.pem();
     let key_pem = key_pair.serialize_pem();
 
-    fs::write(CA_CERT_PATH, &cert_pem)
+    sqlx::query("INSERT INTO ca_keys (id, cert_pem, key_pem) VALUES (1, ?, ?)")
+        .bind(&cert_pem)
+        .bind(&key_pem)
+        .execute(pool)
         .await
-        .map_err(|e| format!("Failed to write {}: {}", CA_CERT_PATH, e))?;
-    fs::write(CA_KEY_PATH, &key_pem)
-        .await
-        .map_err(|e| format!("Failed to write {}: {}", CA_KEY_PATH, e))?;
+        .map_err(|e| format!("Failed to persist CA to database: {}", e))?;
 
-    info!("Root CA written to {} / {}", CA_CERT_PATH, CA_KEY_PATH);
+    info!("Root CA stored in database");
 
     Ok(CaState { subject_cn: CA_CN.to_string(), cert, key_pair })
 }

@@ -27,7 +27,9 @@ async fn main() {
     let mut supervisor = Supervisor::new();
 
     // ── Initialise Certificate Authority ─────────────────────────────
-    let _ca_service = match register_ca().await {
+    let ca_db_url = std::env::var("CA_DATABASE_URL")
+        .unwrap_or_else(|_| "sqlite://placenet_ca.db".to_string());
+    let _ca_service = match register_ca(&ca_db_url).await {
         Ok(ca) => ca,
         Err(e) => {
             tracing::error!("Failed to initialise CA: {}", e);
