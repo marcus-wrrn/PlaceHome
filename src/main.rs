@@ -5,6 +5,7 @@ use tracing::info;
 use placenet_home::config::Config;
 use placenet_home::services::mqtt_brokerage::manager::{register_onto as register_mqtt_broker, start_mosquitto_brokerage};
 use placenet_home::services::mqtt_client::manager::{register_onto as register_mqtt_client, start_mqtt_client};
+use placenet_home::services::ca::manager::register as register_ca;
 use placenet_home::services::http::manager::{register_onto as register_http_server, start_http};
 use placenet_home::services::http::handshake::build_brokerage_info;
 use placenet_home::services;
@@ -24,6 +25,15 @@ async fn main() {
     let required_binaries = ["mosquitto", "mosquitto_passwd"];
     let capabilities = services::detect_capabilities(&required_binaries).await;
     let mut supervisor = Supervisor::new();
+
+    // ── Initialise Certificate Authority ─────────────────────────────
+    let _ca_service = match register_ca().await {
+        Ok(ca) => ca,
+        Err(e) => {
+            tracing::error!("Failed to initialise CA: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     // ── Build MQTT brokerage info for device handshake response ──────
     let brokerage_info = build_brokerage_info(&config.mqtt_brokerage);
