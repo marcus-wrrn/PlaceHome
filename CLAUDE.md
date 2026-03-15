@@ -7,7 +7,7 @@ placenet-home/
 ├── Cargo.toml
 ├── Cargo.lock
 ├── .env
-├── migrations/
+├── migrations/                       ← 0001_ca_keys, 0002_device_certs
 ├── static/                           ← served at GET /static/*
 │   └── index.html
 └── src/

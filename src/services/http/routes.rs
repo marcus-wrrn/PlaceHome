@@ -5,12 +5,20 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use serde::Serialize;
 use tracing::{error, info, warn};
 
-use super::handshake::{DeviceInfo, MqttBrokerageInfo};
+use super::handshake::DeviceInfo;
+use super::AppState;
 
 const PLACENET_INIT_HEADER: &str = "x-placenet-init";
 const SUPPORTED_VERSION: &str = "0.0.1";
+
+#[derive(Serialize)]
+struct InitResponse {
+    cert_pem: String,
+    brokerage: super::handshake::MqttBrokerageInfo,
+}
 
 async fn parse_device_info(body: Body) -> Result<DeviceInfo, Response> {
     let bytes = axum::body::to_bytes(body, 64 * 1024)
@@ -39,11 +47,10 @@ pub async fn health() -> impl IntoResponse {
 
 /// `POST /`
 ///
-/// Expects the `X-PlaceNet-Init: <version>` header and a JSON body
-/// matching [`DeviceInfo`].  On success the device is given MQTT brokerage
-/// information (address, port, topics) as a JSON response.
+/// Expects the `X-PlaceNet-Init: <version>` header and a JSON body matching [`DeviceInfo`].
+/// Signs the device's CSR, stores the cert, and returns it alongside MQTT brokerage info.
 pub async fn init_device(
-    State(brokerage): State<MqttBrokerageInfo>,
+    State(state): State<AppState>,
     request: Request,
 ) -> impl IntoResponse {
     // ── 1. Validate the protocol-version header ──────────────────────────
@@ -84,13 +91,32 @@ pub async fn init_device(
         Err(resp) => return resp,
     };
 
+    let device_id = &device.mdns.hostname;
+
     info!(
         address = %device.address,
-        mdns_hostname = %device.mdns.hostname,
+        mdns_hostname = %device_id,
         mdns_port = device.mdns.port,
-        "Device verified — sending brokerage info"
+        "Device handshake — signing CSR"
     );
 
-    // ── 3. Return MQTT brokerage information ─────────────────────────────
-    (StatusCode::OK, Json(brokerage)).into_response()
+    // ── 3. Sign the CSR and store the cert ──────────────────────────────
+    let cert_pem = match state.ca.sign_csr(device_id, &device.csr_pem).await {
+        Ok(pem) => pem,
+        Err(e) => {
+            error!(device_id, "Failed to sign CSR: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to sign device certificate")
+                .into_response();
+        }
+    };
+
+    // ── 4. Return signed cert + MQTT brokerage information ───────────────
+    (
+        StatusCode::OK,
+        Json(InitResponse {
+            cert_pem,
+            brokerage: state.brokerage_info,
+        }),
+    )
+        .into_response()
 }

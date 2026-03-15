@@ -29,7 +29,7 @@ async fn main() {
     // ── Initialise Certificate Authority ─────────────────────────────
     let ca_db_url = std::env::var("CA_DATABASE_URL")
         .unwrap_or_else(|_| "sqlite://placenet_ca.db".to_string());
-    let _ca_service = match register_ca(&ca_db_url).await {
+    let ca_service = match register_ca(&ca_db_url).await {
         Ok(ca) => ca,
         Err(e) => {
             tracing::error!("Failed to initialise CA: {}", e);
@@ -41,7 +41,7 @@ async fn main() {
     let brokerage_info = build_brokerage_info(&config.mqtt_brokerage);
 
     // ── Register HTTP server ─────────────────────────────────────────
-    register_http_server(&mut supervisor, config.http, brokerage_info);
+    register_http_server(&mut supervisor, config.http, brokerage_info, ca_service);
 
     // ── Register Mosquitto broker ────────────────────────────────────
     let mqtt_broker_config = Arc::new(RwLock::new(config.mqtt_brokerage));

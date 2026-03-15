@@ -4,7 +4,7 @@ use super::CaService;
 
 /// Construct and initialise the CA service.
 ///
-/// Opens (or creates) the SQLite database at `db_path`, runs migrations,
+/// Opens (or creates) the SQLite database at `db_url`, runs migrations,
 /// and loads or generates the root CA.
 pub async fn register(db_url: &str) -> Result<CaService, String> {
     let options = SqliteConnectOptions::from_str(db_url)
@@ -16,7 +16,7 @@ pub async fn register(db_url: &str) -> Result<CaService, String> {
         .await
         .map_err(|e| format!("Failed to open CA database: {}", e))?;
 
-    let service = CaService::new();
-    service.init(&pool).await?;
+    let service = CaService::new(pool);
+    service.init().await?;
     Ok(service)
 }

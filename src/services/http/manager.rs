@@ -1,14 +1,20 @@
 use tracing::{error, info};
 
 use crate::config::HttpConfig;
+use crate::infra::ca::CaService;
 use crate::supervisor::{Supervisor, SupervisorHandle};
 use crate::services::ServiceId;
 use super::HttpService;
 use super::handshake::MqttBrokerageInfo;
 
 /// Build and register the HTTP service onto the supervisor.
-pub fn register_onto(supervisor: &mut Supervisor, config: HttpConfig, brokerage_info: MqttBrokerageInfo) {
-    let service = HttpService::new(config, brokerage_info);
+pub fn register_onto(
+    supervisor: &mut Supervisor,
+    config: HttpConfig,
+    brokerage_info: MqttBrokerageInfo,
+    ca: CaService,
+) {
+    let service = HttpService::new(config, brokerage_info, ca);
     supervisor.register(ServiceId::Http, Box::new(service), true);
 }
 

@@ -84,8 +84,9 @@ async fn generate_and_persist_ca(pool: &SqlitePool) -> Result<CaState, String> {
 }
 
 /// Sign a PEM-encoded CSR with the loaded root CA.
-/// Returns the signed certificate as PEM.
-pub fn sign_csr(ca: &CaState, csr_pem: &str) -> Result<String, String> {
+///
+/// Returns `(cert_pem, issued_at, expires_at)` where the timestamps are Unix seconds.
+pub fn sign_csr(ca: &CaState, csr_pem: &str) -> Result<(String, i64, i64), String> {
     let csr = CertificateSigningRequestParams::from_pem(csr_pem)
         .map_err(|e| format!("Invalid CSR: {}", e))?;
 
@@ -93,5 +94,13 @@ pub fn sign_csr(ca: &CaState, csr_pem: &str) -> Result<String, String> {
         .signed_by(&ca.cert, &ca.key_pair)
         .map_err(|e| format!("Failed to sign CSR: {}", e))?;
 
-    Ok(signed.pem())
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    // Default validity: 1 year
+    let expires_at = now + 365 * 24 * 60 * 60;
+
+    Ok((signed.pem(), now, expires_at))
 }

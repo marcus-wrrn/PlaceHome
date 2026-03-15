@@ -8,37 +8,132 @@ use tracing::info;
 
 use operations::CaState;
 
-/// Holds the loaded/generated CA state, shared across the application.
+#[derive(Debug, Clone)]
+pub struct DeviceCertRecord {
+    pub device_id: String,
+    pub cert_pem: String,
+    pub issued_at: i64,
+    pub expires_at: i64,
+    pub revoked: bool,
+}
+
+/// Holds the loaded/generated CA state and the DB pool, shared across the application.
 #[derive(Clone)]
 pub struct CaService {
     pub state: Arc<RwLock<Option<CaState>>>,
+    pool: SqlitePool,
 }
 
 impl CaService {
-    pub fn new() -> Self {
+    pub fn new(pool: SqlitePool) -> Self {
         Self {
             state: Arc::new(RwLock::new(None)),
+            pool,
         }
     }
 
-    /// Initialise the CA: run migrations, load from database if a CA exists,
-    /// otherwise generate a new root CA and persist it.
-    pub async fn init(&self, pool: &SqlitePool) -> Result<(), String> {
+    /// Run migrations, load from database if a CA exists, otherwise generate a new root CA.
+    pub async fn init(&self) -> Result<(), String> {
         sqlx::migrate!("./migrations")
-            .run(pool)
+            .run(&self.pool)
             .await
             .map_err(|e| format!("Failed to run CA migrations: {}", e))?;
 
-        let ca_state = operations::load_or_generate_ca(pool).await?;
+        let ca_state = operations::load_or_generate_ca(&self.pool).await?;
         info!("CA ready (CN={})", ca_state.subject_cn);
         *self.state.write().await = Some(ca_state);
         Ok(())
     }
 
-    /// Sign a PEM-encoded CSR and return the signed certificate as PEM.
-    pub async fn sign_csr(&self, csr_pem: &str) -> Result<String, String> {
+    /// Sign a PEM-encoded CSR, persist the issued cert under `device_id`, and return the cert PEM.
+    /// If the device already has a cert it is replaced (upsert).
+    pub async fn sign_csr(&self, device_id: &str, csr_pem: &str) -> Result<String, String> {
         let guard = self.state.read().await;
         let ca = guard.as_ref().ok_or("CA not initialised")?;
-        operations::sign_csr(ca, csr_pem)
+        let (cert_pem, issued_at, expires_at) = operations::sign_csr(ca, csr_pem)?;
+
+        sqlx::query(
+            "INSERT INTO device_certs (device_id, cert_pem, issued_at, expires_at, revoked)
+             VALUES (?, ?, ?, ?, 0)
+             ON CONFLICT(device_id) DO UPDATE SET
+                 cert_pem   = excluded.cert_pem,
+                 issued_at  = excluded.issued_at,
+                 expires_at = excluded.expires_at,
+                 revoked    = 0",
+        )
+        .bind(device_id)
+        .bind(&cert_pem)
+        .bind(issued_at)
+        .bind(expires_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to persist device cert: {}", e))?;
+
+        info!(device_id, "Issued and stored certificate");
+        Ok(cert_pem)
+    }
+
+    /// Return the stored cert PEM for a device, or `None` if unknown.
+    pub async fn get_cert(&self, device_id: &str) -> Result<Option<String>, String> {
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT cert_pem FROM device_certs WHERE device_id = ?")
+                .bind(device_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| format!("Failed to query device cert: {}", e))?;
+
+        Ok(row.map(|(pem,)| pem))
+    }
+
+    /// Return all known device cert records.
+    pub async fn list_devices(&self) -> Result<Vec<DeviceCertRecord>, String> {
+        let rows: Vec<(String, String, i64, i64, i64)> = sqlx::query_as(
+            "SELECT device_id, cert_pem, issued_at, expires_at, revoked FROM device_certs",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to list device certs: {}", e))?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(device_id, cert_pem, issued_at, expires_at, revoked)| DeviceCertRecord {
+                device_id,
+                cert_pem,
+                issued_at,
+                expires_at,
+                revoked: revoked != 0,
+            })
+            .collect())
+    }
+
+    /// Mark a device cert as revoked. Returns an error if the device is unknown.
+    pub async fn revoke(&self, device_id: &str) -> Result<(), String> {
+        let rows_affected = sqlx::query(
+            "UPDATE device_certs SET revoked = 1 WHERE device_id = ?",
+        )
+        .bind(device_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to revoke device cert: {}", e))?
+        .rows_affected();
+
+        if rows_affected == 0 {
+            return Err(format!("Unknown device: {}", device_id));
+        }
+
+        info!(device_id, "Certificate revoked");
+        Ok(())
+    }
+
+    /// Returns `true` if the device has a revoked certificate.
+    pub async fn is_revoked(&self, device_id: &str) -> Result<bool, String> {
+        let row: Option<(i64,)> =
+            sqlx::query_as("SELECT revoked FROM device_certs WHERE device_id = ?")
+                .bind(device_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| format!("Failed to query revocation status: {}", e))?;
+
+        Ok(row.map(|(r,)| r != 0).unwrap_or(false))
     }
 }

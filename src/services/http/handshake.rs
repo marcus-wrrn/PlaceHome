@@ -13,6 +13,8 @@ pub struct MdnsConfig {
 pub struct DeviceInfo {
     pub address: String,
     pub mdns: MdnsConfig,
+    /// PEM-encoded Certificate Signing Request for the device.
+    pub csr_pem: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
