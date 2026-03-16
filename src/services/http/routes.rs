@@ -5,8 +5,9 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 use super::handshake::DeviceInfo;
 use super::AppState;
@@ -18,6 +19,18 @@ const SUPPORTED_VERSION: &str = "0.0.1";
 struct InitResponse {
     cert_pem: String,
     brokerage: super::handshake::MqttBrokerageInfo,
+}
+
+#[derive(Deserialize)]
+pub(super) struct ClientRegisterRequest {
+    csr_pem: String,
+}
+
+#[derive(Serialize)]
+struct ClientRegisterResponse {
+    client_id: String,
+    cert_pem: String,
+    ca_cert_pem: String,
 }
 
 async fn parse_device_info(body: Body) -> Result<DeviceInfo, Response> {
@@ -117,6 +130,44 @@ pub async fn init_device(
             cert_pem,
             brokerage: state.brokerage_info,
         }),
+    )
+        .into_response()
+}
+
+/// `POST /.well-known/placenet/register`
+///
+/// Client registration endpoint. Accepts a JSON body containing a PEM-encoded CSR,
+/// issues a CA-signed certificate, and returns the client's assigned ID, its cert,
+/// and the CA cert for trust anchoring.
+pub(super) async fn register_client(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientRegisterRequest>,
+) -> impl IntoResponse {
+    let client_id = Uuid::new_v4().to_string();
+
+    let cert_pem = match state.ca.sign_csr(&client_id, &payload.csr_pem).await {
+        Ok(pem) => pem,
+        Err(e) => {
+            error!(client_id, "Failed to sign client CSR: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to sign client certificate")
+                .into_response();
+        }
+    };
+
+    let ca_cert_pem = match state.ca.ca_cert_pem().await {
+        Ok(pem) => pem,
+        Err(e) => {
+            error!("Failed to retrieve CA cert: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to retrieve CA certificate")
+                .into_response();
+        }
+    };
+
+    info!(client_id, "Client registered successfully");
+
+    (
+        StatusCode::CREATED,
+        Json(ClientRegisterResponse { client_id, cert_pem, ca_cert_pem }),
     )
         .into_response()
 }

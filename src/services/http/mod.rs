@@ -40,6 +40,7 @@ impl HttpService {
         Router::new()
             .route("/", post(http::routes::init_device))
             .route("/health", get(http::routes::health))
+            .route("/.well-known/placenet/register", post(http::routes::register_client))
             .nest_service("/static", ServeDir::new("static"))
             .with_state(self.state.clone())
     }

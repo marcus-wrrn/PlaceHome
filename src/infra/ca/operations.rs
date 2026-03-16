@@ -99,7 +99,7 @@ pub fn sign_csr(ca: &CaState, csr_pem: &str) -> Result<(String, i64, i64), Strin
         .unwrap_or_default()
         .as_secs() as i64;
 
-    // Default validity: 1 year
+    // TODO: Add an expiration system
     let expires_at = now + 365 * 24 * 60 * 60;
 
     Ok((signed.pem(), now, expires_at))

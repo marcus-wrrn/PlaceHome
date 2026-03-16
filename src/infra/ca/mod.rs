@@ -125,6 +125,13 @@ impl CaService {
         Ok(())
     }
 
+    /// Return the root CA certificate as PEM, or an error if not yet initialised.
+    pub async fn ca_cert_pem(&self) -> Result<String, String> {
+        let guard = self.state.read().await;
+        let ca = guard.as_ref().ok_or("CA not initialised")?;
+        Ok(ca.cert.pem())
+    }
+
     /// Returns `true` if the device has a revoked certificate.
     pub async fn is_revoked(&self, device_id: &str) -> Result<bool, String> {
         let row: Option<(i64,)> =

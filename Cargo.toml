@@ -22,3 +22,4 @@ tower-http = { version = "0.6.8", features = ["fs"] }
 rcgen = { version = "0.13", features = ["pem", "x509-parser"] }
 rustls-pemfile = "2"
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate"] }
+uuid = { version = "1", features = ["v4"] }
