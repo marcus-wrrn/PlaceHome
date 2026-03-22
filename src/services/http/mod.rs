@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use axum::{Router, routing::{get, post}};
 use hyper::server::conn::http1;
 use hyper_util::rt::TokioIo;
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 use tokio_rustls::TlsAcceptor;
 use tower_http::services::ServeDir;
@@ -52,6 +52,43 @@ impl HttpService {
     }
 }
 
+async fn serve_connection(stream: TcpStream, app: Router, peer_addr: std::net::SocketAddr) {
+    let io = TokioIo::new(stream);
+    let svc = hyper::service::service_fn(move |req| {
+        let app = app.clone();
+        async move { app.oneshot(req).await }
+    });
+
+    if let Err(e) = http1::Builder::new().serve_connection(io, svc).await {
+        let msg = e.to_string();
+        if !msg.contains("connection reset") && !msg.contains("broken pipe") {
+            error!(%peer_addr, "HTTP connection error: {}", e);
+        }
+    }
+}
+
+async fn serve_tls_connection(stream: TcpStream, tls_acceptor: TlsAcceptor, app: Router, peer_addr: std::net::SocketAddr) {
+    let tls_stream = match tls_acceptor.accept(stream).await {
+        Ok(s) => s,
+        Err(e) => { warn!(%peer_addr, "TLS handshake failed: {}", e); return; }
+    };
+
+    info!(%peer_addr, "TLS handshake complete");
+
+    let io = TokioIo::new(tls_stream);
+    let svc = hyper::service::service_fn(move |req| {
+        let app = app.clone();
+        async move { app.oneshot(req).await }
+    });
+
+    if let Err(e) = http1::Builder::new().serve_connection(io, svc).await {
+        let msg = e.to_string();
+        if !msg.contains("connection reset") && !msg.contains("broken pipe") {
+            error!(%peer_addr, "HTTP connection error: {}", e);
+        }
+    }
+}
+
 #[async_trait]
 impl ManagedService for HttpService {
     async fn start(&mut self) -> Result<u32, String> {
@@ -80,43 +117,15 @@ impl ManagedService for HttpService {
                 info!("HTTPS server listening on {}", local_addr);
 
                 loop {
-                    let accept = tokio::select! {
-                        result = listener.accept() => result,
-                        _ = &mut shutdown_rx => {
-                            info!("HTTPS server shutting down");
-                            break;
-                        }
+                    let (tcp_stream, peer_addr) = tokio::select! {
+                        result = listener.accept() => match result {
+                            Ok(pair) => pair,
+                            Err(e) => { warn!("TCP accept error: {}", e); continue; }
+                        },
+                        _ = &mut shutdown_rx => { info!("HTTPS server shutting down"); break; }
                     };
 
-                    let (tcp_stream, peer_addr) = match accept {
-                        Ok(pair) => pair,
-                        Err(e) => { warn!("TCP accept error: {}", e); continue; }
-                    };
-
-                    let tls_acceptor = tls_acceptor.clone();
-                    let app = app.clone();
-
-                    tokio::spawn(async move {
-                        let tls_stream = match tls_acceptor.accept(tcp_stream).await {
-                            Ok(s) => s,
-                            Err(e) => { warn!(%peer_addr, "TLS handshake failed: {}", e); return; }
-                        };
-
-                        info!(%peer_addr, "TLS handshake complete");
-
-                        let io = TokioIo::new(tls_stream);
-                        let svc = hyper::service::service_fn(move |req| {
-                            let app = app.clone();
-                            async move { app.oneshot(req).await }
-                        });
-
-                        if let Err(e) = http1::Builder::new().serve_connection(io, svc).await {
-                            let msg = e.to_string();
-                            if !msg.contains("connection reset") && !msg.contains("broken pipe") {
-                                error!(%peer_addr, "HTTP connection error: {}", e);
-                            }
-                        }
-                    });
+                    tokio::spawn(serve_tls_connection(tcp_stream, tls_acceptor.clone(), app.clone(), peer_addr));
                 }
             });
         } else {
@@ -124,35 +133,15 @@ impl ManagedService for HttpService {
                 info!("HTTP server listening on {} (TLS disabled)", local_addr);
 
                 loop {
-                    let accept = tokio::select! {
-                        result = listener.accept() => result,
-                        _ = &mut shutdown_rx => {
-                            info!("HTTP server shutting down");
-                            break;
-                        }
+                    let (tcp_stream, peer_addr) = tokio::select! {
+                        result = listener.accept() => match result {
+                            Ok(pair) => pair,
+                            Err(e) => { warn!("TCP accept error: {}", e); continue; }
+                        },
+                        _ = &mut shutdown_rx => { info!("HTTP server shutting down"); break; }
                     };
 
-                    let (tcp_stream, peer_addr) = match accept {
-                        Ok(pair) => pair,
-                        Err(e) => { warn!("TCP accept error: {}", e); continue; }
-                    };
-
-                    let app = app.clone();
-
-                    tokio::spawn(async move {
-                        let io = TokioIo::new(tcp_stream);
-                        let svc = hyper::service::service_fn(move |req| {
-                            let app = app.clone();
-                            async move { app.oneshot(req).await }
-                        });
-
-                        if let Err(e) = http1::Builder::new().serve_connection(io, svc).await {
-                            let msg = e.to_string();
-                            if !msg.contains("connection reset") && !msg.contains("broken pipe") {
-                                error!(%peer_addr, "HTTP connection error: {}", e);
-                            }
-                        }
-                    });
+                    tokio::spawn(serve_connection(tcp_stream, app.clone(), peer_addr));
                 }
             });
         }
