@@ -9,6 +9,7 @@ use placenet_home::infra::ca::manager::register as register_ca;
 use placenet_home::services::http::manager::{register_onto as register_http_server, start_http};
 use placenet_home::services::http::handshake::build_brokerage_info;
 use placenet_home::services;
+use rumqttc::QoS;
 use placenet_home::supervisor::Supervisor;
 
 #[tokio::main]
@@ -49,7 +50,7 @@ async fn main() {
 
     // ── Register MQTT client ─────────────────────────────────────────
     let mqtt_handles = register_mqtt_client(&mut supervisor, config.mqtt_client, broker_available);
-    let _mqtt_handle = mqtt_handles.handle;
+    let mqtt_handle = mqtt_handles.handle;
     let mut inbound_rx = mqtt_handles.inbound_rx;
     let _outbound_tx = mqtt_handles.outbound_tx;
 
@@ -58,6 +59,11 @@ async fn main() {
     // Start services
     start_mosquitto_brokerage(broker_available, &supervisor_handle).await;
     start_mqtt_client(broker_available, &supervisor_handle).await;
+    if broker_available {
+        if let Err(e) = mqtt_handle.subscribe("registration", QoS::AtLeastOnce).await {
+            tracing::error!("Failed to subscribe to 'registration': {}", e);
+        }
+    }
     start_http(&supervisor_handle).await;
 
     // ── Process inbound MQTT messages ────────────────────────────────
