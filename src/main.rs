@@ -53,6 +53,7 @@ async fn main() {
     let mqtt_handle = mqtt_handles.handle;
     let mut inbound_rx = mqtt_handles.inbound_rx;
     let _outbound_tx = mqtt_handles.outbound_tx;
+    let mqtt_connected_rx = mqtt_handles.connected_rx;
 
     let supervisor_handle = supervisor.spawn();
 
@@ -60,8 +61,12 @@ async fn main() {
     start_mosquitto_brokerage(broker_available, &supervisor_handle).await;
     start_mqtt_client(broker_available, &supervisor_handle).await;
     if broker_available {
-        if let Err(e) = mqtt_handle.subscribe("registration", QoS::AtLeastOnce).await {
-            tracing::error!("Failed to subscribe to 'registration': {}", e);
+        if mqtt_connected_rx.await.is_ok() {
+            if let Err(e) = mqtt_handle.subscribe("registration", QoS::AtLeastOnce).await {
+                tracing::error!("Failed to subscribe to 'registration': {}", e);
+            }
+        } else {
+            tracing::error!("MQTT client disconnected before connection was established");
         }
     }
     start_http(&supervisor_handle).await;

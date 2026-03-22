@@ -96,6 +96,7 @@ pub struct MqttClientService {
     shutdown_tx: Option<oneshot::Sender<()>>,
     msg_tx: MqttMessageSender,
     out_rx: Option<MqttOutboundReceiver>,
+    connected_tx: Option<oneshot::Sender<()>>,
 }
 
 impl MqttClientService {
@@ -107,6 +108,7 @@ impl MqttClientService {
         cmd_rx: mpsc::Receiver<MqttCommand>,
         msg_tx: MqttMessageSender,
         out_rx: MqttOutboundReceiver,
+        connected_tx: oneshot::Sender<()>,
     ) -> Self {
         Self {
             config,
@@ -115,6 +117,7 @@ impl MqttClientService {
             shutdown_tx: None,
             msg_tx,
             out_rx: Some(out_rx),
+            connected_tx: Some(connected_tx),
         }
     }
 
@@ -128,7 +131,7 @@ impl MqttClientService {
     /// previously started and the receivers were already moved into the spawned tasks).
     fn take_channels(
         &mut self,
-    ) -> Result<(mpsc::Receiver<MqttCommand>, MqttOutboundReceiver), String> {
+    ) -> Result<(mpsc::Receiver<MqttCommand>, MqttOutboundReceiver, oneshot::Sender<()>), String> {
         let cmd_rx = self
             .cmd_rx
             .take()
@@ -137,7 +140,11 @@ impl MqttClientService {
             .out_rx
             .take()
             .ok_or("MqttClientService outbound receiver already consumed")?;
-        Ok((cmd_rx, out_rx))
+        let connected_tx = self
+            .connected_tx
+            .take()
+            .ok_or("MqttClientService connected sender already consumed")?;
+        Ok((cmd_rx, out_rx, connected_tx))
     }
 
     /// Constructs [`MqttOptions`] from the service configuration.
@@ -170,6 +177,7 @@ impl MqttClientService {
         mut out_rx: MqttOutboundReceiver,
         msg_tx: MqttMessageSender,
         mut shutdown_rx: oneshot::Receiver<()>,
+        mut connected_tx: Option<oneshot::Sender<()>>,
     ) {
         tokio::spawn(async move {
             loop {
@@ -204,6 +212,9 @@ impl MqttClientService {
                             }
                             Ok(Event::Incoming(Packet::ConnAck(_))) => {
                                 info!("MQTT client connected to broker");
+                                if let Some(tx) = connected_tx.take() {
+                                    let _ = tx.send(());
+                                }
                             }
                             Ok(Event::Incoming(Packet::Disconnect)) => {
                                 warn!("MQTT broker disconnected");
@@ -276,7 +287,7 @@ impl ManagedService for MqttClientService {
             return Err("MqttClientService is already running".to_string());
         }
 
-        let (cmd_rx, out_rx) = self.take_channels()?;
+        let (cmd_rx, out_rx, connected_tx) = self.take_channels()?;
         let msg_tx = self.msg_tx.clone();
 
         let opts = self.build_mqtt_opts().await?;
@@ -285,7 +296,7 @@ impl ManagedService for MqttClientService {
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
         self.shutdown_tx = Some(shutdown_tx);
 
-        Self::spawn_eventloop_task(client.clone(), eventloop, out_rx, msg_tx, shutdown_rx);
+        Self::spawn_eventloop_task(client.clone(), eventloop, out_rx, msg_tx, shutdown_rx, Some(connected_tx));
         Self::spawn_command_task(client, cmd_rx);
 
         Ok(0)

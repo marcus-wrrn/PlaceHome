@@ -1,4 +1,4 @@
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tracing::{info, warn, error};
 
 use crate::config::MqttClientConfig;
@@ -16,6 +16,7 @@ pub struct MqttManager {
     pub handle: MqttClientHandle,
     pub inbound_rx: MqttMessageReceiver,
     pub outbound_tx: MqttOutboundSender,
+    pub connected_rx: oneshot::Receiver<()>,
     pub service: MqttClientService,
 }
 
@@ -24,6 +25,8 @@ pub struct MqttManagerHandles {
     pub handle: MqttClientHandle,
     pub inbound_rx: MqttMessageReceiver,
     pub outbound_tx: MqttOutboundSender,
+    /// Resolves once the MQTT client has received a ConnAck from the broker.
+    pub connected_rx: oneshot::Receiver<()>,
 }
 
 impl MqttManager {
@@ -31,14 +34,16 @@ impl MqttManager {
         let (cmd_tx, cmd_rx) = mpsc::channel::<MqttCommand>(CMD_CAPACITY);
         let (msg_tx, msg_rx) = mpsc::channel::<MqttMessage>(MSG_CAPACITY);
         let (out_tx, out_rx) = mpsc::channel::<MqttMessage>(MSG_CAPACITY);
+        let (connected_tx, connected_rx) = oneshot::channel::<()>();
 
-        let service = MqttClientService::new(config, cmd_tx.clone(), cmd_rx, msg_tx, out_rx);
+        let service = MqttClientService::new(config, cmd_tx.clone(), cmd_rx, msg_tx, out_rx, connected_tx);
         let handle = service.handle();
 
         Self {
             handle,
             inbound_rx: msg_rx,
             outbound_tx: out_tx,
+            connected_rx,
             service,
         }
     }
@@ -60,6 +65,7 @@ pub fn register_onto(
         handle: manager.handle.clone(),
         inbound_rx: manager.inbound_rx,
         outbound_tx: manager.outbound_tx,
+        connected_rx: manager.connected_rx,
     };
 
     supervisor.register(ServiceId::MqttClient, Box::new(manager.service), available);
