@@ -134,6 +134,15 @@ pub async fn init_device(
         .into_response()
 }
 
+/// `POST /peer/message`
+///
+/// Receives a plain-text message from a peer placenet-home node and logs it.
+pub async fn peer_message(body: axum::body::Bytes) -> impl IntoResponse {
+    let text = String::from_utf8_lossy(&body);
+    info!(message = %text, "Received peer message");
+    (StatusCode::OK, "Message received")
+}
+
 /// `POST /.well-known/placenet/register`
 ///
 /// Client registration endpoint. Accepts a JSON body containing a PEM-encoded CSR,

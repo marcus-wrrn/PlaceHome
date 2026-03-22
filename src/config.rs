@@ -165,6 +165,7 @@ impl MqttBrokerageConfig {
 pub struct HttpConfig {
     pub host: String,
     pub port: u16,
+    pub tls_enabled: bool,
 }
 
 impl HttpConfig {
@@ -174,7 +175,24 @@ impl HttpConfig {
             .unwrap_or_else(|_| "8080".to_string())
             .parse()
             .unwrap_or(8080);
-        Self { host, port }
+        let tls_enabled = std::env::var("HTTP_TLS_ENABLED")
+            .unwrap_or_else(|_| "true".to_string())
+            .trim()
+            .eq_ignore_ascii_case("true");
+        Self { host, port, tls_enabled }
+    }
+}
+
+/// Configuration for connecting to a peer placenet-home server.
+pub struct PeerConfig {
+    /// Base URL of the peer server, e.g. "http://192.168.1.42:8080"
+    pub peer_url: Option<String>,
+}
+
+impl PeerConfig {
+    fn from_env() -> Self {
+        let peer_url = std::env::var("PEER_URL").ok();
+        Self { peer_url }
     }
 }
 
@@ -182,6 +200,7 @@ pub struct Config {
     pub mqtt_brokerage: MqttBrokerageConfig,
     pub mqtt_client: MqttClientConfig,
     pub http: HttpConfig,
+    pub peer: PeerConfig,
     pub config_dir: PathBuf,
 }
 
@@ -194,6 +213,7 @@ impl Config {
         let mqtt_brokerage = MqttBrokerageConfig::from_env(&config_dir);
         let mqtt_client = MqttClientConfig::from_env(&config_dir);
         let http = HttpConfig::from_env();
-        Self { mqtt_brokerage, mqtt_client, http, config_dir }
+        let peer = PeerConfig::from_env();
+        Self { mqtt_brokerage, mqtt_client, http, peer, config_dir }
     }
 }

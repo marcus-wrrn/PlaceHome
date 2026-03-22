@@ -2,6 +2,7 @@ pub mod capabilities;
 pub mod http;
 pub mod mqtt_brokerage;
 pub mod mqtt_client;
+pub mod peer;
 
 pub use capabilities::{detect_capabilities, ServiceCapabilities, BinaryInfo};
 

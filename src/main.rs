@@ -61,9 +61,20 @@ async fn main() {
     start_http(&supervisor_handle).await;
 
     // ── Process inbound MQTT messages ────────────────────────────────
+    let peer_url = config.peer.peer_url;
     tokio::spawn(async move {
         while let Some(msg) = inbound_rx.recv().await {
             info!(topic = %msg.topic, "Received MQTT message");
+
+            if let Some(ref url) = peer_url {
+                let url = url.clone();
+                tokio::spawn(async move {
+                    match placenet_home::services::peer::send_message(&url, "Hello World").await {
+                        Ok(()) => info!(peer = %url, "Hello World sent to peer"),
+                        Err(e) => tracing::error!(peer = %url, "Failed to send to peer: {}", e),
+                    }
+                });
+            }
         }
     });
 

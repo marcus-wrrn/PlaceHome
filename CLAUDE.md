@@ -27,14 +27,16 @@ placenet-home/
     │   ├── http/
     │   │   ├── mod.rs                    ← HttpService impl
     │   │   ├── manager.rs                ← registration only
-    │   │   ├── routes.rs                 ← route handlers (POST /)
+    │   │   ├── routes.rs                 ← route handlers (POST /, POST /peer/message)
     │   │   └── handshake.rs              ← DeviceInfo struct + TLS handshake logic
     │   ├── mqtt_brokerage/
     │   │   ├── mod.rs                    ← MosquittoBrokerageService impl
     │   │   └── registration.rs           ← registration only
-    │   └── mqtt_client/
-    │       ├── mod.rs                    ← MqttClientService impl
-    │       └── manager.rs                ← registration only
+    │   ├── mqtt_client/
+    │   │   ├── mod.rs                    ← MqttClientService impl
+    │   │   └── manager.rs                ← registration only
+    │   └── peer/
+    │       └── mod.rs                    ← send_message() plain HTTP client to peer node
     └── rendering/
         ├── mod.rs
         └── startup_screen.rs
