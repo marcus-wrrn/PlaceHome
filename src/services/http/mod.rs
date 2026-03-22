@@ -1,13 +1,18 @@
 pub mod handshake;
 pub mod manager;
 pub mod routes;
+pub mod tls;
 
 use async_trait::async_trait;
 use axum::{Router, routing::{get, post}};
+use hyper::server::conn::http1;
+use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
+use tokio_rustls::TlsAcceptor;
 use tower_http::services::ServeDir;
-use tracing::{error, info};
+use tower::ServiceExt;
+use tracing::{error, info, warn};
 
 use crate::config::HttpConfig;
 use crate::infra::ca::CaService;
@@ -56,30 +61,78 @@ impl ManagedService for HttpService {
         let addr = format!("{}:{}", self.config.host, self.config.port);
 
         let listener = TcpListener::bind(&addr).await
-            .map_err(|e| format!("Failed to bind HTTP listener on {}: {}", addr, e))?;
+            .map_err(|e| format!("Failed to bind TLS listener on {}: {}", addr, e))?;
 
         let local_addr = listener.local_addr()
             .map_err(|e| format!("Failed to get local address: {}", e))?;
 
+        // Build TLS config from the live CA — happens before any connection is accepted.
+        let tls_config = tls::build_tls_config(&self.state.ca).await?;
+        let tls_acceptor = TlsAcceptor::from(tls_config);
+
         let app = self.create_app();
 
-        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
         self.shutdown_tx = Some(shutdown_tx);
 
         tokio::spawn(async move {
-            info!("HTTP server listening on {}", local_addr);
-            if let Err(e) = axum::serve(listener, app)
-                .with_graceful_shutdown(async {
-                    let _ = shutdown_rx.await;
-                })
-                .await
-            {
-                error!("HTTP server error: {}", e);
+            info!("HTTPS server listening on {}", local_addr);
+
+            loop {
+                // Poll both the listener and the shutdown signal.
+                let accept = tokio::select! {
+                    result = listener.accept() => result,
+                    _ = &mut shutdown_rx => {
+                        info!("HTTPS server shutting down");
+                        break;
+                    }
+                };
+
+                let (tcp_stream, peer_addr) = match accept {
+                    Ok(pair) => pair,
+                    Err(e) => {
+                        warn!("TCP accept error: {}", e);
+                        continue;
+                    }
+                };
+
+                let tls_acceptor = tls_acceptor.clone();
+                let app = app.clone();
+
+                tokio::spawn(async move {
+                    // ── TLS handshake ────────────────────────────────────────────
+                    let tls_stream = match tls_acceptor.accept(tcp_stream).await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            warn!(%peer_addr, "TLS handshake failed: {}", e);
+                            return;
+                        }
+                    };
+
+                    info!(%peer_addr, "TLS handshake complete");
+
+                    // ── Hand off to hyper / axum ─────────────────────────────────
+                    let io = TokioIo::new(tls_stream);
+
+                    // axum Router implements tower::Service<Request<Incoming>>.
+                    // `ServiceExt::oneshot` consumes a single request — wrap in service_fn
+                    // so hyper can drive multiple requests on the same connection.
+                    let svc = hyper::service::service_fn(move |req| {
+                        let app = app.clone();
+                        async move { app.oneshot(req).await }
+                    });
+
+                    if let Err(e) = http1::Builder::new().serve_connection(io, svc).await {
+                        // "connection reset" / "broken pipe" are normal on keep-alive close
+                        let msg = e.to_string();
+                        if !msg.contains("connection reset") && !msg.contains("broken pipe") {
+                            error!(%peer_addr, "HTTP connection error: {}", e);
+                        }
+                    }
+                });
             }
-            info!("HTTP server stopped");
         });
 
-        // axum doesn't expose a child PID; return 0 as a sentinel
         Ok(0)
     }
 

@@ -42,3 +42,4 @@ placenet-home/
 
 ## Developer Instructions
 - Always update directory in CLAUDE.md after adding/removing files
+- See PLACENET.md for full project vision, protocol design, and architecture overview
