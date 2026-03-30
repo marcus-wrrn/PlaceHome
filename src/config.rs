@@ -166,6 +166,8 @@ pub struct HttpConfig {
     pub host: String,
     pub port: u16,
     pub tls_enabled: bool,
+    /// Port of the local upstream process to proxy traffic to.
+    pub upstream_port: u16,
 }
 
 impl HttpConfig {
@@ -179,7 +181,11 @@ impl HttpConfig {
             .unwrap_or_else(|_| "true".to_string())
             .trim()
             .eq_ignore_ascii_case("true");
-        Self { host, port, tls_enabled }
+        let upstream_port: u16 = std::env::var("HTTP_UPSTREAM_PORT")
+            .unwrap_or_else(|_| "3000".to_string())
+            .parse()
+            .unwrap_or(3000);
+        Self { host, port, tls_enabled, upstream_port }
     }
 }
 

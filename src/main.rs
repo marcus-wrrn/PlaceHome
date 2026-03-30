@@ -6,8 +6,8 @@ use placenet_home::config::Config;
 use placenet_home::services::mqtt_brokerage::manager::{register_onto as register_mqtt_broker, start_mosquitto_brokerage};
 use placenet_home::services::mqtt_client::manager::{register_onto as register_mqtt_client, start_mqtt_client};
 use placenet_home::infra::ca::manager::register as register_ca;
-use placenet_home::services::http::manager::{register_onto as register_http_server, start_http};
-use placenet_home::services::http::handshake::build_brokerage_info;
+use placenet_home::services::gateway::manager::{register_onto as register_gateway, start_gateway};
+use placenet_home::services::gateway::handshake::build_brokerage_info;
 use placenet_home::services;
 use rumqttc::QoS;
 use placenet_home::supervisor::Supervisor;
@@ -38,11 +38,9 @@ async fn main() {
         }
     };
 
-    // ── Build MQTT brokerage info for device handshake response ──────
+    // ── Register gateway service ─────────────────────────────────────
     let brokerage_info = build_brokerage_info(&config.mqtt_brokerage);
-
-    // ── Register HTTP server ─────────────────────────────────────────
-    register_http_server(&mut supervisor, config.http, brokerage_info, ca_service);
+    register_gateway(&mut supervisor, config.http, brokerage_info, ca_service);
 
     // ── Register Mosquitto broker ────────────────────────────────────
     let mqtt_broker_config = Arc::new(RwLock::new(config.mqtt_brokerage));
@@ -69,7 +67,7 @@ async fn main() {
             tracing::error!("MQTT client disconnected before connection was established");
         }
     }
-    start_http(&supervisor_handle).await;
+    start_gateway(&supervisor_handle).await;
 
     // ── Process inbound MQTT messages ────────────────────────────────
     let peer_url = config.peer.peer_url;

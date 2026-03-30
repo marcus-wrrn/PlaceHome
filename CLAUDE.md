@@ -8,7 +8,7 @@ placenet-home/
 ├── Cargo.lock
 ├── .env
 ├── migrations/                       ← 0001_ca_keys, 0002_device_certs
-├── static/                           ← served at GET /static/*
+├── static/                           ← (upstream app content, not served by placenet-home)
 │   └── index.html
 └── src/
     ├── main.rs
@@ -24,11 +24,11 @@ placenet-home/
     ├── services/
     │   ├── mod.rs
     │   ├── capabilities.rs
-    │   ├── http/
-    │   │   ├── mod.rs                    ← HttpService impl
+    │   ├── gateway/
+    │   │   ├── mod.rs                    ← GatewayService impl (TLS proxy + PlaceNet protocol dispatch)
     │   │   ├── manager.rs                ← registration only
-    │   │   ├── routes.rs                 ← route handlers (POST /, POST /peer/message)
-    │   │   └── handshake.rs              ← DeviceInfo struct + TLS handshake logic
+    │   │   ├── tls.rs                    ← rustls ServerConfig builder
+    │   │   └── handshake.rs              ← MqttBrokerageInfo + build_brokerage_info
     │   ├── mqtt_brokerage/
     │   │   ├── mod.rs                    ← MosquittoBrokerageService impl
     │   │   └── registration.rs           ← registration only
