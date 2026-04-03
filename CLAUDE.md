@@ -25,10 +25,13 @@ placenet-home/
     │   ├── mod.rs
     │   ├── capabilities.rs
     │   ├── gateway/
-    │   │   ├── mod.rs                    ← GatewayService impl (TLS proxy + PlaceNet protocol dispatch)
+    │   │   ├── mod.rs                    ← GatewayService, AppState, ManagedService impl, shared types
     │   │   ├── manager.rs                ← registration only
     │   │   ├── tls.rs                    ← rustls ServerConfig builder
-    │   │   └── handshake.rs              ← MqttBrokerageInfo + build_brokerage_info
+    │   │   ├── handshake.rs              ← MqttBrokerageInfo + build_brokerage_info
+    │   │   ├── handlers.rs               ← handle_device_init, handle_client_register
+    │   │   ├── proxy.rs                  ← dispatch, try_forward, serve_connection, serve_tls_connection
+    │   │   └── response.rs               ← text_response, json_response helpers
     │   ├── mqtt_brokerage/
     │   │   ├── mod.rs                    ← MosquittoBrokerageService impl
     │   │   └── registration.rs           ← registration only
