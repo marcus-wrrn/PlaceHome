@@ -20,6 +20,20 @@ pub type MqttMessageReceiver = mpsc::Receiver<MqttMessage>;
 pub type MqttOutboundSender = mpsc::Sender<MqttMessage>;
 pub type MqttOutboundReceiver = mpsc::Receiver<MqttMessage>;
 
+/// A single MQTT topic the client must subscribe to, paired with its required QoS level.
+#[derive(Debug, Clone)]
+pub struct TopicSubscription {
+    pub topic: &'static str,
+    pub qos: QoS,
+}
+
+/// Returns the canonical list of topics this node must subscribe to on startup.
+pub fn required_subscriptions() -> Vec<TopicSubscription> {
+    vec![
+        TopicSubscription { topic: "registration", qos: QoS::AtLeastOnce },
+    ]
+}
+
 pub enum MqttCommand {
     Subscribe {
         topic: String,
@@ -54,6 +68,14 @@ impl MqttClientHandle {
             .await
             .map_err(|_| "mqtt client channel closed".to_string())?;
         rx.await.map_err(|_| "mqtt client dropped reply".to_string())?
+    }
+
+    /// Subscribes to every topic in `subscriptions` in order, returning the first error encountered.
+    pub async fn subscribe_all(&self, subscriptions: &[TopicSubscription]) -> Result<(), String> {
+        for sub in subscriptions {
+            self.subscribe(sub.topic, sub.qos).await?;
+        }
+        Ok(())
     }
 
     /// Sends an unsubscribe request to the MQTT client for the given topic.
