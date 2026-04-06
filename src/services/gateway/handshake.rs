@@ -31,6 +31,20 @@ pub struct MqttBrokerageInfo {
     pub topics: Vec<MqttTopicConfig>,
 }
 
+/// Wraps a raw beacon MQTT registration payload with this server's identity
+/// information so that receiving peers know which placenet-home forwarded the
+/// message and how to reach the cloud gateway.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EnrichedRegistrationMessage {
+    /// Raw payload published by the beacon on the "registration" MQTT topic.
+    pub beacon_payload: serde_json::Value,
+    /// URL of the placenet-home server that received and forwarded this message.
+    /// Used as an opaque identity/ID by the cloud gateway.
+    pub server_url: String,
+    /// URL of the cloud gateway WebSocket endpoint, if configured.
+    pub gateway_url: Option<String>,
+}
+
 pub fn build_brokerage_info(config: &MqttBrokerageConfig) -> MqttBrokerageInfo {
     let port = if config.tls_enabled { config.mqtts_port } else { config.port };
     MqttBrokerageInfo {
