@@ -189,16 +189,39 @@ impl HttpConfig {
     }
 }
 
-/// Configuration for connecting to a peer placenet-home server.
-pub struct PeerConfig {
-    /// Base URL of the peer server, e.g. "http://192.168.1.42:8080"
-    pub peer_url: Option<String>,
+// /// Configuration for connecting to a peer placenet-home server.
+// pub struct PeerConfig {
+//     /// Base URL of the peer server, e.g. "http://192.168.1.42:8080"
+//     pub peer_url: Option<String>,
+// }
+
+// impl PeerConfig {
+//     fn from_env() -> Self {
+//         let peer_url = std::env::var("PEER_URL").ok();
+//         Self { peer_url }
+//     }
+// }
+
+/// Configuration for cloud gateway registration.
+pub struct GatewayRegistrationConfig {
+    /// This server's URL, used as its identity when registering with the cloud
+    /// gateway and when enriching forwarded registration messages.
+    /// e.g. "https://home-a.example.local:8080"
+    /// Does not need to be internet-routable; it is used as an opaque ID.
+    pub server_url: String,
+
+    /// URL of the cloud gateway WebSocket endpoint.
+    /// e.g. "ws://gateway.example.com:9000"
+    /// Must be reachable from the open internet.
+    pub gateway_url: Option<String>,
 }
 
-impl PeerConfig {
+impl GatewayRegistrationConfig {
     fn from_env() -> Self {
-        let peer_url = std::env::var("PEER_URL").ok();
-        Self { peer_url }
+        let server_url = std::env::var("PLACENET_SERVER_URL")
+            .unwrap_or_else(|_| "http://localhost:8080".to_string());
+        let gateway_url = std::env::var("PLACENET_GATEWAY_URL").ok();
+        Self { server_url, gateway_url }
     }
 }
 
@@ -206,7 +229,8 @@ pub struct Config {
     pub mqtt_brokerage: MqttBrokerageConfig,
     pub mqtt_client: MqttClientConfig,
     pub http: HttpConfig,
-    pub peer: PeerConfig,
+    // pub peer: PeerConfig,
+    pub gateway_registration: GatewayRegistrationConfig,
     pub config_dir: PathBuf,
 }
 
@@ -219,7 +243,8 @@ impl Config {
         let mqtt_brokerage = MqttBrokerageConfig::from_env(&config_dir);
         let mqtt_client = MqttClientConfig::from_env(&config_dir);
         let http = HttpConfig::from_env();
-        let peer = PeerConfig::from_env();
-        Self { mqtt_brokerage, mqtt_client, http, peer, config_dir }
+        // let peer = PeerConfig::from_env();
+        let gateway_registration = GatewayRegistrationConfig::from_env();
+        Self { mqtt_brokerage, mqtt_client, http, gateway_registration, config_dir }
     }
 }
