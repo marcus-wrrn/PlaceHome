@@ -46,6 +46,7 @@ placenet-home/
     │   │   ├── tls.rs           ← build_tls_config() — rustls ServerConfig from CaService
     │   │   ├── handshake.rs     ← DeviceInfo, MqttBrokerageInfo, EnrichedRegistrationMessage, build_brokerage_info()
     │   │   ├── handlers.rs      ← handle_device_init(), handle_client_register()
+    │   │   ├── headers.rs       ← HEADER_INIT, HEADER_REGISTER — PlaceNet HTTP header name constants
     │   │   ├── proxy.rs         ← dispatch(), try_forward(), serve_connection(), serve_tls_connection()
     │   │   └── response.rs      ← text_response(), json_response() helpers
     │   ├── mqtt_brokerage/

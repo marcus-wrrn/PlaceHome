@@ -2,6 +2,7 @@ pub mod handshake;
 pub mod manager;
 pub mod tls;
 mod handlers;
+mod headers;
 mod proxy;
 mod response;
 

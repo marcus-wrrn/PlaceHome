@@ -3,6 +3,7 @@ use hyper::body::Incoming;
 use hyper::{Request, Response};
 use tracing::{error, info, warn};
 
+use super::headers::HEADER_INIT;
 use super::response::{json_response, text_response};
 use super::{AppState, ProxyBody, BODY_LIMIT, SUPPORTED_VERSION};
 
@@ -11,9 +12,14 @@ pub(super) struct ClientRegisterRequest {
     pub(super) csr_pem: String,
 }
 
+/// `X-PlaceNet-Health` — health check: returns 200 OK.
+pub(super) async fn handle_health(_req: Request<Incoming>) -> Response<ProxyBody> {
+    text_response(200, "OK")
+}
+
 /// `X-PlaceNet-Init: <version>` — device handshake: sign CSR, return cert + brokerage info.
 pub(super) async fn handle_device_init(state: &AppState, req: Request<Incoming>) -> Response<ProxyBody> {
-    let version = match req.headers().get("x-placenet-init").and_then(|v| v.to_str().ok()) {
+    let version = match req.headers().get(HEADER_INIT).and_then(|v| v.to_str().ok()) {
         Some(v) => v.to_owned(),
         None => return text_response(400, "Invalid X-PlaceNet-Init header"),
     };

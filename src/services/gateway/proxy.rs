@@ -10,16 +10,20 @@ use tokio::net::TcpStream;
 use tokio_rustls::TlsAcceptor;
 use tracing::{error, info, warn};
 
-use super::handlers::{handle_client_register, handle_device_init};
+use super::handlers::{handle_client_register, handle_device_init, handle_health};
+use super::headers::{HEADER_HEALTH, HEADER_INIT, HEADER_REGISTER};
 use super::response::text_response;
 use super::{AppState, BoxError, ProxyBody};
 
 /// Dispatch a request: handle PlaceNet protocol requests locally, proxy everything else upstream.
 pub(super) async fn dispatch(state: AppState, req: Request<Incoming>) -> Result<Response<ProxyBody>, Infallible> {
-    if req.headers().contains_key("x-placenet-init") {
+    if req.headers().contains_key(HEADER_HEALTH) {
+        return Ok(handle_health(req).await);
+    }
+    if req.headers().contains_key(HEADER_INIT) {
         return Ok(handle_device_init(&state, req).await);
     }
-    if req.headers().contains_key("x-placenet-register") {
+    if req.headers().contains_key(HEADER_REGISTER) {
         return Ok(handle_client_register(&state, req).await);
     }
 
