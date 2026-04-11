@@ -7,7 +7,8 @@ use placenet_home::services::mqtt_brokerage::manager::{register_onto as register
 use placenet_home::services::mqtt_client::manager::{register_onto as register_mqtt_client, start_mqtt_client};
 use placenet_home::infra::ca::manager::register as register_ca;
 use placenet_home::services::gateway::manager::{register_onto as register_gateway, start_gateway};
-use placenet_home::services::gateway::handshake::{build_brokerage_info, EnrichedRegistrationMessage};
+use placenet_home::services::gateway::handshake::build_brokerage_info;
+use placenet_home::services::cloud_gateway::{connect_to_gateway, messages::GatewayMessage};
 use placenet_home::services::cloud_gateway::manager::{register_onto as register_cloud_gateway, start_cloud_gateway};
 use placenet_home::services;
 use placenet_home::services::mqtt_client;
@@ -84,39 +85,55 @@ async fn main() {
 
     // ── Process inbound MQTT messages ────────────────────────────────
     let server_url = config.gateway_registration.server_url;
-    let gateway_url = config.gateway_registration.gateway_url;
+    let own_gateway_url = config.gateway_registration.gateway_url;
     tokio::spawn(async move {
+        // Seed the known-gateways set with this server's own configured gateway so
+        // beacons advertising the same gateway don't trigger a redundant connection.
+        let mut known_gateways = std::collections::HashSet::new();
+        if let Some(ref url) = own_gateway_url {
+            known_gateways.insert(url.clone());
+        }
+
+        // Keep (handle, shutdown_tx) pairs alive so dynamic connections persist.
+        let mut dynamic_connections = Vec::new();
+
         while let Some(msg) = inbound_rx.recv().await {
             info!(topic = %msg.topic, "Received MQTT message");
 
-            if let Some(ref url) = gateway_url {
-                // Parse the raw beacon payload, falling back to a string value
-                // if it isn't valid JSON.
-                let beacon_payload: serde_json::Value =
-                    serde_json::from_slice(&msg.payload)
-                        .unwrap_or_else(|_| {
-                            serde_json::Value::String(
-                                String::from_utf8_lossy(&msg.payload).into_owned(),
-                            )
-                        });
+            // Parse the raw beacon payload, falling back to a string value if it
+            // isn't valid JSON.
+            let beacon_payload: serde_json::Value =
+                serde_json::from_slice(&msg.payload)
+                    .unwrap_or_else(|_| {
+                        serde_json::Value::String(
+                            String::from_utf8_lossy(&msg.payload).into_owned(),
+                        )
+                    });
 
-                let enriched = EnrichedRegistrationMessage {
-                    beacon_payload,
-                    server_url: server_url.clone(),
-                    gateway_url: gateway_url.clone(),
-                };
+            // Extract the gateway_url advertised by the beacon, if present.
+            let beacon_gateway_url = beacon_payload
+                .as_object()
+                .and_then(|obj| obj.get("gateway_url"))
+                .and_then(|v| v.as_str())
+                .map(str::to_owned);
 
-                match serde_json::to_string(&enriched) {
-                    Ok(body) => {
-                        let url = url.clone();
-                        tokio::spawn(async move {
-                            match placenet_home::services::peer::send_message(&url, &body).await {
-                                Ok(()) => info!(peer = %url, "Forwarded registration to peer"),
-                                Err(e) => tracing::error!(peer = %url, "Failed to forward to peer: {}", e),
-                            }
-                        });
+            if let Some(gw_url) = beacon_gateway_url {
+                if known_gateways.contains(&gw_url) {
+                    info!(gateway = %gw_url, "Beacon's gateway already connected, skipping");
+                } else {
+                    info!(gateway = %gw_url, "Beacon advertises new gateway — registering");
+                    known_gateways.insert(gw_url.clone());
+                    let (handle, shutdown_tx) = connect_to_gateway(server_url.clone(), gw_url.clone());
+                    // Queue the beacon payload immediately; the connection task will
+                    // deliver it after the Register frame is sent.
+                    let registration = GatewayMessage::BeaconRegistration {
+                        server_url: server_url.clone(),
+                        payload: beacon_payload,
+                    };
+                    if let Err(e) = handle.send(registration).await {
+                        tracing::error!(gateway = %gw_url, "Failed to queue beacon payload: {}", e);
                     }
-                    Err(e) => tracing::error!("Failed to serialise enriched registration: {}", e),
+                    dynamic_connections.push((handle, shutdown_tx));
                 }
             }
         }

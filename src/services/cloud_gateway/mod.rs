@@ -69,14 +69,30 @@ impl CloudGatewayService {
     }
 
     fn ws_url(&self) -> String {
-        // Append /ws if the gateway URL doesn't already end with it.
-        let base = self.gateway_url.trim_end_matches('/');
-        if base.ends_with("/ws") {
-            base.to_string()
-        } else {
-            format!("{}/ws", base)
-        }
+        compute_ws_url(&self.gateway_url)
     }
+}
+
+fn compute_ws_url(gateway_url: &str) -> String {
+    let base = gateway_url.trim_end_matches('/');
+    if base.ends_with("/ws") {
+        base.to_string()
+    } else {
+        format!("{}/ws", base)
+    }
+}
+
+/// Spawn a persistent WebSocket connection to `gateway_url` without supervisor
+/// management. Immediately sends a `Register` frame and reconnects on failure.
+///
+/// The returned `oneshot::Sender` must be kept alive for the connection to
+/// persist — dropping it signals a graceful shutdown.
+pub fn connect_to_gateway(server_url: String, gateway_url: String) -> (CloudGatewayHandle, oneshot::Sender<()>) {
+    let (outbound_tx, outbound_rx) = mpsc::channel(OUTBOUND_CAPACITY);
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    let ws_url = compute_ws_url(&gateway_url);
+    spawn_connection_task(server_url, ws_url, outbound_rx, shutdown_rx);
+    (CloudGatewayHandle { tx: outbound_tx }, shutdown_tx)
 }
 
 #[async_trait]

@@ -14,6 +14,16 @@ pub enum GatewayMessage {
     /// Received when another server has requested a session with us.
     ConnectRequest { from: String },
 
+    /// Forwarded beacon registration payload. Sent after connecting to a gateway
+    /// that was advertised by a beacon, so the gateway knows which device caused
+    /// the connection and which placenet-home forwarded it.
+    BeaconRegistration {
+        /// URL of the placenet-home server forwarding this message.
+        server_url: String,
+        /// Raw payload published by the beacon on the "registration" MQTT topic.
+        payload: serde_json::Value,
+    },
+
     /// A relay frame, either outbound (us → gateway) or inbound (gateway → us).
     Relay {
         from: String,
