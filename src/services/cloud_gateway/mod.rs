@@ -75,8 +75,15 @@ impl CloudGatewayService {
 
 fn compute_ws_url(gateway_url: &str) -> String {
     let base = gateway_url.trim_end_matches('/');
-    if base.ends_with("/ws") {
+    let base = if base.starts_with("https://") {
+        base.replacen("https://", "wss://", 1)
+    } else if base.starts_with("http://") {
+        base.replacen("http://", "ws://", 1)
+    } else {
         base.to_string()
+    };
+    if base.ends_with("/ws") {
+        base
     } else {
         format!("{}/ws", base)
     }

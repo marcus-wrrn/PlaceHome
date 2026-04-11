@@ -23,7 +23,7 @@ rcgen = { version = "0.13", features = ["pem", "x509-parser"] }
 rustls-pemfile = "2"
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate"] }
 uuid = { version = "1", features = ["v4"] }
-tokio-tungstenite = "0.24"
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 futures-util = "0.3"
 
 [dev-dependencies]
