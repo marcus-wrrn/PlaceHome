@@ -11,7 +11,8 @@ placenet-home/
 ├── .env
 ├── migrations/
 │   ├── 0001_ca_keys.sql         ← CA root key/cert storage
-│   └── 0002_device_certs.sql    ← Issued device cert records
+│   ├── 0002_device_certs.sql    ← Issued device cert records
+│   └── 0003_node_identity.sql   ← This node's own MQTT client cert + key
 ├── static/
 │   └── index.html               ← (upstream app content, not served by placenet-home)
 ├── tests/
@@ -40,7 +41,7 @@ placenet-home/
     │   │   ├── mod.rs           ← CloudGatewayService, CloudGatewayHandle, ManagedService impl
     │   │   ├── manager.rs       ← register_onto(), start_cloud_gateway()
     │   │   └── messages.rs      ← GatewayMessage enum (Register, Connect, ConnectRequest, Relay, Ack)
-    │   ├── gateway/
+    │   ├── local_gateway/
     │   │   ├── mod.rs           ← GatewayService, AppState, ManagedService impl
     │   │   ├── manager.rs       ← register_onto(), start_gateway()
     │   │   ├── tls.rs           ← build_tls_config() — rustls ServerConfig from CaService
@@ -126,6 +127,8 @@ All config is loaded via `Config::from_env()`. Relevant variables:
 | `MQTT_CAFILE` | `certs/ca.crt` (relative to config dir) | CA cert for MQTT TLS |
 | `MQTT_CERTFILE` | `certs/broker.crt` | Broker TLS cert |
 | `MQTT_KEYFILE` | `certs/broker.key` | Broker TLS key |
+| `MQTT_CLIENT_CERTFILE` | `certs/client.crt` | Client cert for home node's MQTT mutual TLS |
+| `MQTT_CLIENT_KEYFILE` | `certs/client.key` | Client key for home node's MQTT mutual TLS |
 | `PEER_URL` | _(unset)_ | Base URL of peer placenet-home node |
 | `PLACENET_SERVER_URL` | `http://localhost:8080` | This server's identity URL (opaque ID sent to gateway) |
 | `PLACENET_GATEWAY_URL` | _(unset)_ | Cloud gateway WebSocket URL — enables `CloudGatewayService` when set |
@@ -162,7 +165,7 @@ Tests are integration-style (in `tests/`), using real SQLite in-memory or `tempf
 4. Update the directory tree in this file.
 
 ### Adding a new HTTP endpoint
-Add a handler in `src/services/gateway/handlers.rs` and dispatch it from `src/services/gateway/proxy.rs::dispatch()` by checking for the appropriate header or path.
+Add a handler in `src/services/local_gateway/handlers.rs` and dispatch it from `src/services/local_gateway/proxy.rs::dispatch()` by checking for the appropriate header or path.
 
 ## Developer Instructions
 - Always update the directory tree in CLAUDE.md after adding or removing files.

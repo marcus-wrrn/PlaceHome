@@ -2,17 +2,31 @@ use std::sync::Arc;
 use rustls;
 use tokio::sync::RwLock;
 use tracing::info;
-use placenet_home::config::Config;
+use placenet_home::config::{Config, MqttClientConfig};
+use placenet_home::infra::ca::CaService;
 use placenet_home::services::mqtt_brokerage::manager::{register_onto as register_mqtt_broker, start_mosquitto_brokerage};
 use placenet_home::services::mqtt_client::manager::{register_onto as register_mqtt_client, start_mqtt_client};
 use placenet_home::infra::ca::manager::register as register_ca;
-use placenet_home::services::gateway::manager::{register_onto as register_gateway, start_gateway};
-use placenet_home::services::gateway::handshake::build_brokerage_info;
+use placenet_home::services::local_gateway::manager::{register_onto as register_gateway, start_gateway};
+use placenet_home::services::local_gateway::handshake::build_brokerage_info;
 use placenet_home::services::cloud_gateway::{connect_to_gateway, messages::GatewayMessage};
 use placenet_home::services::cloud_gateway::manager::{register_onto as register_cloud_gateway, start_cloud_gateway};
 use placenet_home::services;
 use placenet_home::services::mqtt_client;
 use placenet_home::supervisor::Supervisor;
+
+async fn provision_node_identity(ca: &CaService, cfg: &MqttClientConfig) -> Result<(), String> {
+    let (cert_pem, key_pem) = ca.ensure_node_identity().await?;
+    if let Some(parent) = cfg.certfile.parent() {
+        tokio::fs::create_dir_all(parent).await
+            .map_err(|e| format!("Failed to create cert dir: {e}"))?;
+    }
+    tokio::fs::write(&cfg.certfile, &cert_pem).await
+        .map_err(|e| format!("Failed to write node cert: {e}"))?;
+    tokio::fs::write(&cfg.keyfile, &key_pem).await
+        .map_err(|e| format!("Failed to write node key: {e}"))?;
+    Ok(())
+}
 
 #[tokio::main]
 async fn main() {
@@ -41,12 +55,27 @@ async fn main() {
     };
 
     // ── Register gateway service ─────────────────────────────────────
-    let brokerage_info = build_brokerage_info(&config.mqtt_brokerage);
-    register_gateway(&mut supervisor, config.http, brokerage_info, ca_service);
+    let ca_cert_pem = match ca_service.ca_cert_pem().await {
+        Ok(pem) => pem,
+        Err(e) => {
+            tracing::error!("Failed to retrieve CA cert PEM: {}", e);
+            std::process::exit(1);
+        }
+    };
+    let brokerage_info = build_brokerage_info(&config.mqtt_brokerage, ca_cert_pem);
+    register_gateway(&mut supervisor, config.http, brokerage_info, ca_service.clone());
 
     // ── Register Mosquitto broker ────────────────────────────────────
     let mqtt_broker_config = Arc::new(RwLock::new(config.mqtt_brokerage));
     let broker_available = register_mqtt_broker(&mut supervisor, &capabilities, Arc::clone(&mqtt_broker_config)).await;
+
+    // ── Provision node identity for MQTT mutual TLS ──────────────────
+    if config.mqtt_client.tls_enabled {
+        if let Err(e) = provision_node_identity(&ca_service, &config.mqtt_client).await {
+            tracing::error!("{}", e);
+            std::process::exit(1);
+        }
+    }
 
     // ── Register MQTT client ─────────────────────────────────────────
     let mqtt_handles = register_mqtt_client(&mut supervisor, config.mqtt_client, broker_available);

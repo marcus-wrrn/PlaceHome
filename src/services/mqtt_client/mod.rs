@@ -176,13 +176,20 @@ impl MqttClientService {
         let mut opts =
             MqttOptions::new(&self.config.client_id, &self.config.host, self.config.port);
         opts.set_keep_alive(std::time::Duration::from_secs(30));
-        opts.set_credentials(&self.config.username, &self.config.password);
 
         if self.config.tls_enabled {
             let ca = tokio::fs::read(&self.config.cafile).await.map_err(|e| {
                 format!("Failed to read CA cert '{}': {}", self.config.cafile.display(), e)
             })?;
-            opts.set_transport(Transport::tls(ca, None, None));
+            let cert = tokio::fs::read(&self.config.certfile).await.map_err(|e| {
+                format!("Failed to read client cert '{}': {}", self.config.certfile.display(), e)
+            })?;
+            let key = tokio::fs::read(&self.config.keyfile).await.map_err(|e| {
+                format!("Failed to read client key '{}': {}", self.config.keyfile.display(), e)
+            })?;
+            opts.set_transport(Transport::tls(ca, Some((cert, key)), None));
+        } else {
+            opts.set_credentials(&self.config.username, &self.config.password);
         }
 
         Ok(opts)

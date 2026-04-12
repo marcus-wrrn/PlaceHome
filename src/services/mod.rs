@@ -1,6 +1,6 @@
 pub mod capabilities;
 pub mod cloud_gateway;
-pub mod gateway;
+pub mod local_gateway;
 pub mod mqtt_brokerage;
 pub mod mqtt_client;
 pub mod peer;

@@ -132,6 +132,47 @@ impl CaService {
         Ok(ca.cert.pem())
     }
 
+    /// Return the node's own client cert and key PEM, generating and persisting them if absent.
+    ///
+    /// On first call a new key pair and CA-signed client certificate are created and stored in
+    /// the `node_identity` table. Subsequent calls return the stored values unchanged, so the
+    /// identity is stable across restarts.
+    pub async fn ensure_node_identity(&self) -> Result<(String, String), String> {
+        // Check for an existing identity first.
+        let row: Option<(String, String)> = sqlx::query_as(
+            "SELECT cert_pem, key_pem FROM node_identity WHERE id = 1",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to query node identity: {}", e))?;
+
+        if let Some((cert_pem, key_pem)) = row {
+            info!("Loaded existing node identity from database");
+            return Ok((cert_pem, key_pem));
+        }
+
+        // Generate a fresh identity signed by the CA.
+        let guard = self.state.read().await;
+        let ca = guard.as_ref().ok_or("CA not initialised")?;
+        let (cert_pem, key_pem, issued_at, expires_at) =
+            operations::generate_node_identity(ca)?;
+
+        sqlx::query(
+            "INSERT INTO node_identity (id, cert_pem, key_pem, issued_at, expires_at)
+             VALUES (1, ?, ?, ?, ?)",
+        )
+        .bind(&cert_pem)
+        .bind(&key_pem)
+        .bind(issued_at)
+        .bind(expires_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to persist node identity: {}", e))?;
+
+        info!("Generated and stored new node identity certificate");
+        Ok((cert_pem, key_pem))
+    }
+
     /// Returns `true` if the device has a revoked certificate.
     pub async fn is_revoked(&self, device_id: &str) -> Result<bool, String> {
         let row: Option<(i64,)> =

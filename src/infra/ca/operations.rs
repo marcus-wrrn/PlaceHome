@@ -1,6 +1,6 @@
 use rcgen::{
     Certificate, CertificateParams, CertificateSigningRequestParams,
-    DistinguishedName, DnType, IsCa, KeyPair, KeyUsagePurpose,
+    DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose,
 };
 use sqlx::SqlitePool;
 use tracing::info;
@@ -81,6 +81,34 @@ async fn generate_and_persist_ca(pool: &SqlitePool) -> Result<CaState, String> {
     info!("Root CA stored in database");
 
     Ok(CaState { subject_cn: CA_CN.to_string(), cert, key_pair })
+}
+
+/// Generate a new key pair and a CA-signed client certificate for this node's own MQTT identity.
+///
+/// Returns `(cert_pem, key_pem, issued_at, expires_at)`.
+/// The cert has `ExtendedKeyUsagePurpose::ClientAuth` so Mosquitto accepts it for mutual TLS.
+pub fn generate_node_identity(ca: &CaState) -> Result<(String, String, i64, i64), String> {
+    let key_pair = KeyPair::generate()
+        .map_err(|e| format!("Failed to generate node identity key pair: {}", e))?;
+
+    let mut params = CertificateParams::default();
+    let mut dn = DistinguishedName::new();
+    dn.push(DnType::CommonName, "placenet-home");
+    dn.push(DnType::OrganizationName, "PlaceNet");
+    params.distinguished_name = dn;
+    params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+
+    let cert = params
+        .signed_by(&key_pair, &ca.cert, &ca.key_pair)
+        .map_err(|e| format!("Failed to sign node identity certificate: {}", e))?;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let expires_at = now + 365 * 24 * 60 * 60;
+
+    Ok((cert.pem(), key_pair.serialize_pem(), now, expires_at))
 }
 
 /// Sign a PEM-encoded CSR with the loaded root CA.

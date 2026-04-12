@@ -29,6 +29,9 @@ pub struct MqttBrokerageInfo {
     pub address: String,
     pub port: u16,
     pub topics: Vec<MqttTopicConfig>,
+    /// PEM-encoded CA certificate. The device must trust this to verify the broker's
+    /// TLS certificate and to present its own CA-signed client certificate.
+    pub ca_cert_pem: String,
 }
 
 /// Wraps a raw beacon MQTT registration payload with this server's identity
@@ -45,7 +48,7 @@ pub struct EnrichedRegistrationMessage {
     pub gateway_url: Option<String>,
 }
 
-pub fn build_brokerage_info(config: &MqttBrokerageConfig) -> MqttBrokerageInfo {
+pub fn build_brokerage_info(config: &MqttBrokerageConfig, ca_cert_pem: String) -> MqttBrokerageInfo {
     let port = if config.tls_enabled { config.mqtts_port } else { config.port };
     MqttBrokerageInfo {
         address: "localhost".to_string(),
@@ -53,5 +56,6 @@ pub fn build_brokerage_info(config: &MqttBrokerageConfig) -> MqttBrokerageInfo {
         topics: vec![
             MqttTopicConfig { topic: "placenet/test".to_string(), qos: 1 },
         ],
+        ca_cert_pem,
     }
 }

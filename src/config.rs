@@ -5,11 +5,17 @@ pub struct MqttClientConfig {
     pub client_id: String,
     pub host: String,
     pub port: u16,
-    pub username: String,
-    pub password: String,
     pub tls_enabled: bool,
     /// Path to the CA certificate used to verify the broker's TLS certificate.
     pub cafile: PathBuf,
+    /// Path to this node's client certificate (used for TLS mutual auth).
+    pub certfile: PathBuf,
+    /// Path to this node's client private key (used for TLS mutual auth).
+    pub keyfile: PathBuf,
+    /// Username for plain (non-TLS) MQTT auth.
+    pub username: String,
+    /// Password for plain (non-TLS) MQTT auth.
+    pub password: String,
 }
 
 impl MqttClientConfig {
@@ -32,15 +38,21 @@ impl MqttClientConfig {
                 .parse()
                 .unwrap_or(1883)
         };
+        let cafile = config_dir.join(
+            std::env::var("MQTT_CAFILE").unwrap_or_else(|_| "certs/ca.crt".to_string()),
+        );
+        let certfile = config_dir.join(
+            std::env::var("MQTT_CLIENT_CERTFILE").unwrap_or_else(|_| "certs/client.crt".to_string()),
+        );
+        let keyfile = config_dir.join(
+            std::env::var("MQTT_CLIENT_KEYFILE").unwrap_or_else(|_| "certs/client.key".to_string()),
+        );
         let username = std::env::var("MQTT_USERNAME")
             .unwrap_or_else(|_| "placenet".to_string());
         let password = std::env::var("MQTT_PASSWORD")
             .unwrap_or_else(|_| "changeme".to_string());
-        let cafile = config_dir.join(
-            std::env::var("MQTT_CAFILE").unwrap_or_else(|_| "certs/ca.crt".to_string()),
-        );
 
-        Self { client_id, host, port, username, password, tls_enabled, cafile }
+        Self { client_id, host, port, tls_enabled, cafile, certfile, keyfile, username, password }
     }
 }
 
@@ -127,6 +139,9 @@ impl MqttBrokerageConfig {
         if self.tls_enabled {
             // Plain listener is omitted when TLS is enabled to force all
             // traffic through the encrypted channel.
+            // require_certificate true means the client cert IS the credential —
+            // no password_file needed. use_identity_as_username maps the cert CN
+            // to the MQTT username so ACL rules can reference it.
             config.push_str(&format!(
                 "listener {}\n\
                  protocol mqtt\n\
@@ -134,14 +149,13 @@ impl MqttBrokerageConfig {
                  certfile {}\n\
                  keyfile {}\n\
                  tls_version tlsv1.2\n\
-                 require_certificate false\n\
-                 allow_anonymous false\n\
-                 password_file {}\n",
+                 require_certificate true\n\
+                 use_identity_as_username true\n\
+                 allow_anonymous false\n",
                 self.mqtts_port,
                 self.cafile.display(),
                 self.certfile.display(),
                 self.keyfile.display(),
-                self.password_file.display(),
             ));
         } else {
             config.push_str(&format!(
