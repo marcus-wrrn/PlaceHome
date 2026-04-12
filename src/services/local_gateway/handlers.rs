@@ -29,6 +29,20 @@ pub(super) async fn handle_device_init(state: &AppState, req: Request<Incoming>)
         return text_response(400, "Unsupported version");
     }
 
+    // Extract Host header before consuming req with into_body().
+    let broker_host = req
+        .headers()
+        .get(hyper::header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .map(|h| {
+            // Strip port: "192.168.2.39:8080" → "192.168.2.39"
+            match h.rfind(':') {
+                Some(i) if !h.starts_with('[') => h[..i].to_string(),
+                _ => h.to_string(),
+            }
+        })
+        .unwrap_or_else(|| "localhost".to_string());
+
     let body_bytes = match Limited::new(req.into_body(), BODY_LIMIT).collect().await {
         Ok(b) => b.to_bytes(),
         Err(e) => {
@@ -54,21 +68,6 @@ pub(super) async fn handle_device_init(state: &AppState, req: Request<Incoming>)
             return text_response(500, "Failed to sign device certificate");
         }
     };
-
-    // Derive the broker address from the Host header so remote devices get the
-    // server's actual network address rather than "localhost".
-    let broker_host = req
-        .headers()
-        .get(hyper::header::HOST)
-        .and_then(|v| v.to_str().ok())
-        .map(|h| {
-            // Strip port: "192.168.2.39:8080" → "192.168.2.39"
-            match h.rfind(':') {
-                Some(i) if !h.starts_with('[') => h[..i].to_string(),
-                _ => h.to_string(),
-            }
-        })
-        .unwrap_or_else(|| "localhost".to_string());
 
     let mut brokerage = state.brokerage_info.clone();
     brokerage.address = broker_host;
