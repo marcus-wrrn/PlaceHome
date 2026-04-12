@@ -124,11 +124,27 @@ impl ManagedService for MosquittoBrokerageService {
             ));
         }
 
-        let mut child = Command::new(&self.binary_path)
-            .args(["-c", &config_file.to_string_lossy()])
+        let mut cmd = Command::new(&self.binary_path);
+        cmd.args(["-c", &config_file.to_string_lossy()])
             .stderr(std::process::Stdio::piped())
             .stdout(std::process::Stdio::null())
-            .spawn()
+            .kill_on_drop(true);
+
+        // On Linux: ask the kernel to send SIGTERM to mosquitto if this process dies,
+        // even if killed with SIGKILL (the only reliable way to handle abnormal termination).
+        #[cfg(target_os = "linux")]
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::prctl(
+                    libc::PR_SET_PDEATHSIG,
+                    libc::SIGTERM as libc::c_ulong,
+                    0, 0, 0,
+                );
+                Ok(())
+            });
+        }
+
+        let mut child = cmd.spawn()
             .map_err(|e| format!("Failed to spawn mosquitto: {}", e))?;
 
         let pid = child.id().ok_or("Failed to get mosquitto PID")?;
