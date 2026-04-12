@@ -55,7 +55,25 @@ pub(super) async fn handle_device_init(state: &AppState, req: Request<Incoming>)
         }
     };
 
-    let resp = serde_json::json!({ "cert_pem": cert_pem, "brokerage": state.brokerage_info });
+    // Derive the broker address from the Host header so remote devices get the
+    // server's actual network address rather than "localhost".
+    let broker_host = req
+        .headers()
+        .get(hyper::header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .map(|h| {
+            // Strip port: "192.168.2.39:8080" → "192.168.2.39"
+            match h.rfind(':') {
+                Some(i) if !h.starts_with('[') => h[..i].to_string(),
+                _ => h.to_string(),
+            }
+        })
+        .unwrap_or_else(|| "localhost".to_string());
+
+    let mut brokerage = state.brokerage_info.clone();
+    brokerage.address = broker_host;
+
+    let resp = serde_json::json!({ "cert_pem": cert_pem, "brokerage": brokerage });
     json_response(200, serde_json::to_vec(&resp).unwrap())
 }
 
