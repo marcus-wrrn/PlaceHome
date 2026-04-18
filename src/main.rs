@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use rustls;
 use tokio::sync::RwLock;
-use tracing::info;
+use tracing::{debug, info};
 use placenet_home::config::{Config, MqttBrokerageConfig, MqttClientConfig};
 use placenet_home::infra::ca::CaService;
 use placenet_home::services::mqtt_brokerage::manager::{register_onto as register_mqtt_broker, start_mosquitto_brokerage};
@@ -70,11 +70,20 @@ async fn provision_broker_cert(ca: &CaService, cfg: &MqttBrokerageConfig) -> Res
         .map_err(|e| format!("Failed to write broker CA cert: {e}"))?;
 
     let local_ips = get_local_ips();
+    info!(
+        san_ips = ?local_ips,
+        san_dns = ?["localhost"],
+        cafile = %cfg.cafile.display(),
+        certfile = %cfg.certfile.display(),
+        "Provisioning broker TLS cert",
+    );
     let (cert_pem, key_pem) = ca.generate_broker_cert(&local_ips, &["localhost"]).await?;
+    debug!(broker_cert_pem = %cert_pem, "Broker cert PEM");
     tokio::fs::write(&cfg.certfile, &cert_pem).await
         .map_err(|e| format!("Failed to write broker cert: {e}"))?;
     tokio::fs::write(&cfg.keyfile, &key_pem).await
         .map_err(|e| format!("Failed to write broker key: {e}"))?;
+    info!("Broker TLS cert written successfully");
 
     Ok(())
 }
