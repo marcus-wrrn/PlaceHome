@@ -2,7 +2,7 @@ use std::sync::Arc;
 use rustls;
 use tokio::sync::RwLock;
 use tracing::info;
-use placenet_home::config::{Config, MqttClientConfig};
+use placenet_home::config::{Config, MqttBrokerageConfig, MqttClientConfig};
 use placenet_home::infra::ca::CaService;
 use placenet_home::services::mqtt_brokerage::manager::{register_onto as register_mqtt_broker, start_mosquitto_brokerage};
 use placenet_home::services::mqtt_client::manager::{register_onto as register_mqtt_client, start_mqtt_client};
@@ -14,6 +14,43 @@ use placenet_home::services::cloud_gateway::manager::{register_onto as register_
 use placenet_home::services;
 use placenet_home::services::mqtt_client;
 use placenet_home::supervisor::Supervisor;
+
+/// Detect the primary outbound local IP(s) for embedding as SANs in the broker cert.
+fn get_local_ips() -> Vec<std::net::IpAddr> {
+    let mut ips = Vec::new();
+    if let Ok(sock) = std::net::UdpSocket::bind("0.0.0.0:0") {
+        // Connect to an external address to discover the outbound interface IP.
+        // No packets are sent — UDP connect() just selects the route.
+        if sock.connect("8.8.8.8:80").is_ok() {
+            if let Ok(addr) = sock.local_addr() {
+                ips.push(addr.ip());
+            }
+        }
+    }
+    ips.push(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+    ips
+}
+
+/// Write the CA cert and a fresh broker TLS cert/key to the paths in `cfg`.
+async fn provision_broker_cert(ca: &CaService, cfg: &MqttBrokerageConfig) -> Result<(), String> {
+    if let Some(parent) = cfg.certfile.parent() {
+        tokio::fs::create_dir_all(parent).await
+            .map_err(|e| format!("Failed to create broker cert dir: {e}"))?;
+    }
+
+    let ca_cert_pem = ca.ca_cert_pem().await?;
+    tokio::fs::write(&cfg.cafile, &ca_cert_pem).await
+        .map_err(|e| format!("Failed to write broker CA cert: {e}"))?;
+
+    let local_ips = get_local_ips();
+    let (cert_pem, key_pem) = ca.generate_broker_cert(&local_ips, &["localhost"]).await?;
+    tokio::fs::write(&cfg.certfile, &cert_pem).await
+        .map_err(|e| format!("Failed to write broker cert: {e}"))?;
+    tokio::fs::write(&cfg.keyfile, &key_pem).await
+        .map_err(|e| format!("Failed to write broker key: {e}"))?;
+
+    Ok(())
+}
 
 async fn provision_node_identity(ca: &CaService, cfg: &MqttClientConfig) -> Result<(), String> {
     let (cert_pem, key_pem) = ca.ensure_node_identity().await?;
@@ -64,6 +101,14 @@ async fn main() {
     };
     let brokerage_info = build_brokerage_info(&config.mqtt_brokerage, ca_cert_pem);
     register_gateway(&mut supervisor, config.http, brokerage_info, ca_service.clone());
+
+    // ── Provision broker TLS cert ────────────────────────────────────
+    if config.mqtt_brokerage.tls_enabled {
+        if let Err(e) = provision_broker_cert(&ca_service, &config.mqtt_brokerage).await {
+            tracing::error!("{}", e);
+            std::process::exit(1);
+        }
+    }
 
     // ── Register Mosquitto broker ────────────────────────────────────
     let mqtt_broker_config = Arc::new(RwLock::new(config.mqtt_brokerage));

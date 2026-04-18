@@ -1,6 +1,7 @@
 use rcgen::{
     Certificate, CertificateParams, CertificateSigningRequestParams,
-    DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose,
+    DistinguishedName, DnType, ExtendedKeyUsagePurpose, Ia5String, IsCa, KeyPair,
+    KeyUsagePurpose, SanType,
 };
 use sqlx::SqlitePool;
 use tracing::info;
@@ -109,6 +110,40 @@ pub fn generate_node_identity(ca: &CaState) -> Result<(String, String, i64, i64)
     let expires_at = now + 365 * 24 * 60 * 60;
 
     Ok((cert.pem(), key_pair.serialize_pem(), now, expires_at))
+}
+
+/// Generate a new key pair and CA-signed TLS server certificate for the MQTT broker.
+///
+/// The cert carries `ServerAuth` EKU and the provided SANs so that TLS clients
+/// (e.g. the beacon) can verify the broker by IP address or hostname.
+pub fn generate_broker_identity(
+    ca: &CaState,
+    san_ips: &[std::net::IpAddr],
+    san_hostnames: &[&str],
+) -> Result<(String, String), String> {
+    let key_pair = KeyPair::generate()
+        .map_err(|e| format!("Failed to generate broker key pair: {}", e))?;
+
+    let mut params = CertificateParams::default();
+    let mut dn = DistinguishedName::new();
+    dn.push(DnType::CommonName, "placenet-broker");
+    dn.push(DnType::OrganizationName, "PlaceNet");
+    params.distinguished_name = dn;
+    params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+
+    let mut sans: Vec<SanType> = san_ips.iter().map(|ip| SanType::IpAddress(*ip)).collect();
+    for name in san_hostnames {
+        if let Ok(s) = Ia5String::try_from(*name) {
+            sans.push(SanType::DnsName(s));
+        }
+    }
+    params.subject_alt_names = sans;
+
+    let cert = params
+        .signed_by(&key_pair, &ca.cert, &ca.key_pair)
+        .map_err(|e| format!("Failed to sign broker certificate: {}", e))?;
+
+    Ok((cert.pem(), key_pair.serialize_pem()))
 }
 
 /// Sign a PEM-encoded CSR with the loaded root CA.

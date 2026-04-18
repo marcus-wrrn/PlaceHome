@@ -132,6 +132,21 @@ impl CaService {
         Ok(ca.cert.pem())
     }
 
+    /// Generate a CA-signed TLS server certificate for the MQTT broker.
+    ///
+    /// The certificate carries `ServerAuth` EKU and Subject Alternative Names for
+    /// the supplied IPs and hostnames so that connecting TLS clients can verify it.
+    /// A fresh cert is generated on every call (no persistence).
+    pub async fn generate_broker_cert(
+        &self,
+        san_ips: &[std::net::IpAddr],
+        san_hostnames: &[&str],
+    ) -> Result<(String, String), String> {
+        let guard = self.state.read().await;
+        let ca = guard.as_ref().ok_or("CA not initialised")?;
+        operations::generate_broker_identity(ca, san_ips, san_hostnames)
+    }
+
     /// Return the node's own client cert and key PEM, generating and persisting them if absent.
     ///
     /// On first call a new key pair and CA-signed client certificate are created and stored in
