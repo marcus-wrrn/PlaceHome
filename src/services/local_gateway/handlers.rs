@@ -1,7 +1,7 @@
 use http_body_util::{BodyExt, Limited};
 use hyper::body::Incoming;
 use hyper::{Request, Response};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use super::headers::HEADER_INIT;
 use super::response::{json_response, text_response};
@@ -59,7 +59,18 @@ pub(super) async fn handle_device_init(state: &AppState, req: Request<Incoming>)
         }
     };
 
-    info!(mdns_hostname = %device.mdns.hostname, address = %device.address, "Device handshake — signing CSR");
+    info!(
+        mdns_hostname = %device.mdns.hostname,
+        mdns_port = device.mdns.port,
+        address = %device.address,
+        "Device handshake — signing CSR",
+    );
+    debug!(
+        mdns_hostname = %device.mdns.hostname,
+        address = %device.address,
+        csr_pem = %device.csr_pem,
+        "Device init request payload",
+    );
 
     let cert_pem = match state.ca.sign_csr(&device.mdns.hostname, &device.csr_pem).await {
         Ok(pem) => pem,
@@ -73,6 +84,14 @@ pub(super) async fn handle_device_init(state: &AppState, req: Request<Incoming>)
     brokerage.address = broker_host;
 
     let resp = serde_json::json!({ "cert_pem": cert_pem, "brokerage": brokerage });
+    debug!(
+        mdns_hostname = %device.mdns.hostname,
+        broker_address = %brokerage.address,
+        broker_port = brokerage.port,
+        cert_pem = %cert_pem,
+        brokerage_info = %serde_json::to_string(&brokerage).unwrap_or_default(),
+        "Device init response payload",
+    );
     json_response(200, serde_json::to_vec(&resp).unwrap())
 }
 
@@ -96,6 +115,9 @@ pub(super) async fn handle_client_register(state: &AppState, req: Request<Incomi
 
     let client_id = uuid::Uuid::new_v4().to_string();
 
+    info!(client_id, "Client register — signing CSR");
+    debug!(client_id, csr_pem = %payload.csr_pem, "Client register request payload");
+
     let cert_pem = match state.ca.sign_csr(&client_id, &payload.csr_pem).await {
         Ok(pem) => pem,
         Err(e) => {
@@ -113,6 +135,12 @@ pub(super) async fn handle_client_register(state: &AppState, req: Request<Incomi
     };
 
     info!(client_id, "Client registered successfully");
+    debug!(
+        client_id,
+        cert_pem = %cert_pem,
+        ca_cert_pem = %ca_cert_pem,
+        "Client register response payload",
+    );
 
     let resp = serde_json::json!({ "client_id": client_id, "cert_pem": cert_pem, "ca_cert_pem": ca_cert_pem });
     json_response(201, serde_json::to_vec(&resp).unwrap())

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, QoS, Transport};
 use tokio::sync::{mpsc, oneshot};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::config::MqttClientConfig;
 use crate::supervisor::ManagedService;
@@ -217,6 +217,8 @@ impl MqttClientService {
                         break;
                     }
                     Some(msg) = out_rx.recv() => {
+                        let payload_str = std::str::from_utf8(&msg.payload).unwrap_or("<binary>");
+                        debug!(topic = %msg.topic, payload = %payload_str, "MQTT outbound publish");
                         if let Err(e) = client
                             .publish(&msg.topic, QoS::AtLeastOnce, false, msg.payload)
                             .await
@@ -227,6 +229,9 @@ impl MqttClientService {
                     poll = eventloop.poll() => {
                         match poll {
                             Ok(Event::Incoming(Packet::Publish(publish))) => {
+                                let payload_str = std::str::from_utf8(&publish.payload).unwrap_or("<binary>");
+                                info!(topic = %publish.topic, "MQTT inbound message received");
+                                debug!(topic = %publish.topic, payload = %payload_str, "MQTT inbound message payload");
                                 let msg = MqttMessage {
                                     topic: publish.topic.clone(),
                                     payload: publish.payload.clone(),
