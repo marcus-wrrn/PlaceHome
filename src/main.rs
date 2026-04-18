@@ -15,18 +15,45 @@ use placenet_home::services;
 use placenet_home::services::mqtt_client;
 use placenet_home::supervisor::Supervisor;
 
-/// Detect the primary outbound local IP(s) for embedding as SANs in the broker cert.
+/// Collect all non-loopback local IPs for embedding as SANs in the broker cert.
+///
+/// Uses getifaddrs to enumerate every interface so the cert is valid regardless
+/// of which interface the beacon reaches the server on.
 fn get_local_ips() -> Vec<std::net::IpAddr> {
     let mut ips = Vec::new();
-    if let Ok(sock) = std::net::UdpSocket::bind("0.0.0.0:0") {
-        // Connect to an external address to discover the outbound interface IP.
-        // No packets are sent — UDP connect() just selects the route.
-        if sock.connect("8.8.8.8:80").is_ok() {
-            if let Ok(addr) = sock.local_addr() {
-                ips.push(addr.ip());
+
+    unsafe {
+        let mut ifaddrs: *mut libc::ifaddrs = std::ptr::null_mut();
+        if libc::getifaddrs(&mut ifaddrs) == 0 {
+            let mut ifa = ifaddrs;
+            while !ifa.is_null() {
+                let addr = (*ifa).ifa_addr;
+                if !addr.is_null() {
+                    match (*addr).sa_family as libc::c_int {
+                        libc::AF_INET => {
+                            let sin = addr as *const libc::sockaddr_in;
+                            // s_addr is in network byte order (big-endian).
+                            let ip = std::net::Ipv4Addr::from(u32::from_be((*sin).sin_addr.s_addr));
+                            if !ip.is_loopback() {
+                                ips.push(std::net::IpAddr::V4(ip));
+                            }
+                        }
+                        libc::AF_INET6 => {
+                            let sin6 = addr as *const libc::sockaddr_in6;
+                            let ip = std::net::Ipv6Addr::from((*sin6).sin6_addr.s6_addr);
+                            if !ip.is_loopback() {
+                                ips.push(std::net::IpAddr::V6(ip));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                ifa = (*ifa).ifa_next;
             }
+            libc::freeifaddrs(ifaddrs);
         }
     }
+
     ips.push(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
     ips
 }
