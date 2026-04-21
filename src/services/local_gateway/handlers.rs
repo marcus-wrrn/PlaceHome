@@ -1,16 +1,10 @@
-use http_body_util::{BodyExt, Limited};
 use hyper::body::Incoming;
 use hyper::{Request, Response};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
-use super::headers::HEADER_INIT;
+use super::requests::{DeviceInitRequest, DeviceRegisterRequest};
 use super::response::{json_response, text_response};
-use super::{AppState, ProxyBody, BODY_LIMIT, SUPPORTED_VERSION};
-
-#[derive(serde::Deserialize)]
-pub(super) struct ClientRegisterRequest {
-    pub(super) csr_pem: String,
-}
+use super::{AppState, ProxyBody};
 
 /// `X-PlaceNet-Health` — health check: returns 200 OK.
 pub(super) async fn handle_health(_req: Request<Incoming>) -> Response<ProxyBody> {
@@ -19,45 +13,12 @@ pub(super) async fn handle_health(_req: Request<Incoming>) -> Response<ProxyBody
 
 /// `X-PlaceNet-Init: <version>` — device handshake: sign CSR, return cert + brokerage info.
 pub(super) async fn handle_device_init(state: &AppState, req: Request<Incoming>) -> Response<ProxyBody> {
-    let version = match req.headers().get(HEADER_INIT).and_then(|v| v.to_str().ok()) {
-        Some(v) => v.to_owned(),
-        None => return text_response(400, "Invalid X-PlaceNet-Init header"),
+    let request = match DeviceInitRequest::process_request(req).await {
+        Ok(p) => p,
+        Err(r) => return r,
     };
 
-    if version != SUPPORTED_VERSION {
-        warn!("Unsupported PlaceNet init version: {}", version);
-        return text_response(400, "Unsupported version");
-    }
-
-    // Extract Host header before consuming req with into_body().
-    let broker_host = req
-        .headers()
-        .get(hyper::header::HOST)
-        .and_then(|v| v.to_str().ok())
-        .map(|h| {
-            // Strip port: "192.168.2.39:8080" → "192.168.2.39"
-            match h.rfind(':') {
-                Some(i) if !h.starts_with('[') => h[..i].to_string(),
-                _ => h.to_string(),
-            }
-        })
-        .unwrap_or_else(|| "localhost".to_string());
-
-    let body_bytes = match Limited::new(req.into_body(), BODY_LIMIT).collect().await {
-        Ok(b) => b.to_bytes(),
-        Err(e) => {
-            warn!("Failed to read device init body: {}", e);
-            return text_response(400, "Failed to read request body");
-        }
-    };
-
-    let device: super::handshake::DeviceInfo = match serde_json::from_slice(&body_bytes) {
-        Ok(d) => d,
-        Err(e) => {
-            warn!("Invalid device init payload: {}", e);
-            return text_response(422, "Invalid JSON body");
-        }
-    };
+    let device = &request.device;
 
     info!(
         mdns_hostname = %device.mdns.hostname,
@@ -81,7 +42,7 @@ pub(super) async fn handle_device_init(state: &AppState, req: Request<Incoming>)
     };
 
     let mut brokerage = state.brokerage_info.clone();
-    brokerage.address = broker_host;
+    brokerage.address = request.broker_host;
 
     let resp = serde_json::json!({ "cert_pem": cert_pem, "brokerage": brokerage });
     debug!(
@@ -97,28 +58,17 @@ pub(super) async fn handle_device_init(state: &AppState, req: Request<Incoming>)
 
 /// `X-PlaceNet-Register: <version>` — client cert registration: sign CSR, return cert + CA cert.
 pub(super) async fn handle_client_register(state: &AppState, req: Request<Incoming>) -> Response<ProxyBody> {
-    let body_bytes = match Limited::new(req.into_body(), BODY_LIMIT).collect().await {
-        Ok(b) => b.to_bytes(),
-        Err(e) => {
-            warn!("Failed to read client register body: {}", e);
-            return text_response(400, "Failed to read request body");
-        }
-    };
-
-    let payload: ClientRegisterRequest = match serde_json::from_slice(&body_bytes) {
+    let request = match DeviceRegisterRequest::process_request(req).await {
         Ok(p) => p,
-        Err(e) => {
-            warn!("Invalid client register payload: {}", e);
-            return text_response(422, "Invalid JSON body");
-        }
+        Err(r) => return r,
     };
 
     let client_id = uuid::Uuid::new_v4().to_string();
 
     info!(client_id, "Client register — signing CSR");
-    debug!(client_id, csr_pem = %payload.csr_pem, "Client register request payload");
+    debug!(client_id, csr_pem = %request.csr_pem, "Client register request payload");
 
-    let cert_pem = match state.ca.sign_csr(&client_id, &payload.csr_pem).await {
+    let cert_pem = match state.ca.sign_csr(&client_id, &request.csr_pem).await {
         Ok(pem) => pem,
         Err(e) => {
             error!(client_id, "Failed to sign client CSR: {}", e);

@@ -4,6 +4,7 @@ pub mod tls;
 mod handlers;
 mod headers;
 mod proxy;
+mod requests;
 mod response;
 
 use async_trait::async_trait;

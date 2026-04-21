@@ -49,6 +49,7 @@ placenet-home/
     │   │   ├── handlers.rs      ← handle_device_init(), handle_client_register()
     │   │   ├── headers.rs       ← HEADER_INIT, HEADER_REGISTER — PlaceNet HTTP header name constants
     │   │   ├── proxy.rs         ← dispatch(), try_forward(), serve_connection(), serve_tls_connection()
+    │   │   ├── requests.rs      ← DeviceInitRequest struct + process_request() — parses version, broker_host, device from Request
     │   │   └── response.rs      ← text_response(), json_response() helpers
     │   ├── mqtt_brokerage/
     │   │   ├── mod.rs           ← MosquittoBrokerageService impl (spawns mosquitto process)
