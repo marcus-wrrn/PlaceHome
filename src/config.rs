@@ -150,8 +150,7 @@ impl MqttBrokerageConfig {
                  keyfile {}\n\
                  tls_version tlsv1.2\n\
                  require_certificate true\n\
-                 use_identity_as_username true\n\
-                 allow_anonymous false\n",
+                 use_identity_as_username true\n",
                 self.mqtts_port,
                 self.cafile.display(),
                 self.certfile.display(),
