@@ -7,7 +7,21 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, info, warn};
 
 use crate::config::MqttClientConfig;
+use crate::infra::ca::CaService;
 use crate::supervisor::ManagedService;
+
+pub async fn provision_node_identity(ca: &CaService, cfg: &MqttClientConfig) -> Result<(), String> {
+    let (cert_pem, key_pem) = ca.ensure_node_identity().await?;
+    if let Some(parent) = cfg.certfile.parent() {
+        tokio::fs::create_dir_all(parent).await
+            .map_err(|e| format!("Failed to create cert dir: {e}"))?;
+    }
+    tokio::fs::write(&cfg.certfile, &cert_pem).await
+        .map_err(|e| format!("Failed to write node cert: {e}"))?;
+    tokio::fs::write(&cfg.keyfile, &key_pem).await
+        .map_err(|e| format!("Failed to write node key: {e}"))?;
+    Ok(())
+}
 
 #[derive(Debug, Clone)]
 pub struct MqttMessage {

@@ -1,11 +1,12 @@
 use std::sync::Arc;
 use rustls;
 use tokio::sync::RwLock;
-use tracing::{debug, info};
-use placenet_home::config::{Config, MqttBrokerageConfig, MqttClientConfig};
-use placenet_home::infra::ca::CaService;
+use tracing::info;
+use placenet_home::config::Config;
 use placenet_home::services::mqtt_brokerage::manager::{register_onto as register_mqtt_broker, start_mosquitto_brokerage};
+use placenet_home::services::mqtt_brokerage::provision_broker_cert;
 use placenet_home::services::mqtt_client::manager::{register_onto as register_mqtt_client, start_mqtt_client};
+use placenet_home::services::mqtt_client::provision_node_identity;
 use placenet_home::infra::ca::manager::register as register_ca;
 use placenet_home::services::local_gateway::manager::{register_onto as register_gateway, start_gateway};
 use placenet_home::services::local_gateway::handshake::build_brokerage_info;
@@ -14,98 +15,6 @@ use placenet_home::services::cloud_gateway::manager::{register_onto as register_
 use placenet_home::services;
 use placenet_home::services::mqtt_client;
 use placenet_home::supervisor::Supervisor;
-
-/// Collect all non-loopback local IPs for embedding as SANs in the broker cert.
-///
-/// Uses getifaddrs to enumerate every interface so the cert is valid regardless
-/// of which interface the beacon reaches the server on.
-fn get_local_ips() -> Vec<std::net::IpAddr> {
-    let mut ips = Vec::new();
-
-    unsafe {
-        let mut ifaddrs: *mut libc::ifaddrs = std::ptr::null_mut();
-        if libc::getifaddrs(&mut ifaddrs) == 0 {
-            let mut ifa = ifaddrs;
-            while !ifa.is_null() {
-                let addr = (*ifa).ifa_addr;
-                if !addr.is_null() {
-                    match (*addr).sa_family as libc::c_int {
-                        libc::AF_INET => {
-                            let sin = addr as *const libc::sockaddr_in;
-                            // s_addr is in network byte order (big-endian).
-                            let ip = std::net::Ipv4Addr::from(u32::from_be((*sin).sin_addr.s_addr));
-                            if !ip.is_loopback() {
-                                ips.push(std::net::IpAddr::V4(ip));
-                            }
-                        }
-                        libc::AF_INET6 => {
-                            let sin6 = addr as *const libc::sockaddr_in6;
-                            let ip = std::net::Ipv6Addr::from((*sin6).sin6_addr.s6_addr);
-                            if !ip.is_loopback() {
-                                ips.push(std::net::IpAddr::V6(ip));
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                ifa = (*ifa).ifa_next;
-            }
-            libc::freeifaddrs(ifaddrs);
-        }
-    }
-
-    ips.push(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
-    ips
-}
-
-/// Write the CA cert and a fresh broker TLS cert/key to the paths in `cfg`.
-async fn provision_broker_cert(ca: &CaService, cfg: &MqttBrokerageConfig) -> Result<(), String> {
-    if let Some(parent) = cfg.certfile.parent() {
-        tokio::fs::create_dir_all(parent).await
-            .map_err(|e| format!("Failed to create broker cert dir: {e}"))?;
-    }
-
-    let ca_cert_pem = ca.ca_cert_pem().await?;
-    tokio::fs::write(&cfg.cafile, &ca_cert_pem).await
-        .map_err(|e| format!("Failed to write broker CA cert: {e}"))?;
-
-    let san_ips: Vec<std::net::IpAddr> = if cfg.san_ips.is_empty() {
-        get_local_ips()
-    } else {
-        cfg.san_ips.clone()
-    };
-    let mut san_hostnames: Vec<&str> = vec!["localhost"];
-    san_hostnames.extend(cfg.san_hostnames.iter().map(|s| s.as_str()));
-    info!(
-        san_ips = ?san_ips,
-        san_dns = ?san_hostnames,
-        cafile = %cfg.cafile.display(),
-        certfile = %cfg.certfile.display(),
-        "Provisioning broker TLS cert",
-    );
-    let (cert_pem, key_pem) = ca.generate_broker_cert(&san_ips, &san_hostnames).await?;
-    debug!(broker_cert_pem = %cert_pem, "Broker cert PEM");
-    tokio::fs::write(&cfg.certfile, &cert_pem).await
-        .map_err(|e| format!("Failed to write broker cert: {e}"))?;
-    tokio::fs::write(&cfg.keyfile, &key_pem).await
-        .map_err(|e| format!("Failed to write broker key: {e}"))?;
-    info!("Broker TLS cert written successfully");
-
-    Ok(())
-}
-
-async fn provision_node_identity(ca: &CaService, cfg: &MqttClientConfig) -> Result<(), String> {
-    let (cert_pem, key_pem) = ca.ensure_node_identity().await?;
-    if let Some(parent) = cfg.certfile.parent() {
-        tokio::fs::create_dir_all(parent).await
-            .map_err(|e| format!("Failed to create cert dir: {e}"))?;
-    }
-    tokio::fs::write(&cfg.certfile, &cert_pem).await
-        .map_err(|e| format!("Failed to write node cert: {e}"))?;
-    tokio::fs::write(&cfg.keyfile, &key_pem).await
-        .map_err(|e| format!("Failed to write node key: {e}"))?;
-    Ok(())
-}
 
 #[tokio::main]
 async fn main() {
