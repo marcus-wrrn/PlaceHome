@@ -250,9 +250,16 @@ pub struct Config {
 impl Config {
     /// Load configuration from environment variables, falling back to defaults.
     pub fn from_env() -> Self {
-        let config_dir = PathBuf::from(
+        let config_dir_raw = PathBuf::from(
             std::env::var("PLACENET_CONFIG_DIR").unwrap_or_else(|_| "config".to_string()),
         );
+        let config_dir = if config_dir_raw.is_absolute() {
+            config_dir_raw
+        } else {
+            std::env::current_dir()
+                .expect("cannot determine current directory")
+                .join(config_dir_raw)
+        };
         let mqtt_brokerage = MqttBrokerageConfig::from_env(&config_dir);
         let mqtt_client = MqttClientConfig::from_env(&config_dir);
         let http = HttpConfig::from_env();
