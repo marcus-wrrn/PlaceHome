@@ -1,4 +1,3 @@
-pub mod manager;
 pub mod operations;
 
 use std::sync::Arc;
@@ -25,6 +24,26 @@ pub struct CaService {
 }
 
 impl CaService {
+    /// Open (or create) the SQLite database at `db_url`, run migrations, and load or generate
+    /// the root CA.
+    pub async fn register(db_url: &str) -> Result<Self, String> {
+        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+        use std::str::FromStr;
+
+        let options = SqliteConnectOptions::from_str(db_url)
+            .map_err(|e| format!("Invalid database URL: {}", e))?
+            .create_if_missing(true);
+
+        let pool = SqlitePoolOptions::new()
+            .connect_with(options)
+            .await
+            .map_err(|e| format!("Failed to open CA database: {}", e))?;
+
+        let service = Self::new(pool);
+        service.init().await?;
+        Ok(service)
+    }
+
     pub fn new(pool: SqlitePool) -> Self {
         Self {
             state: Arc::new(RwLock::new(None)),

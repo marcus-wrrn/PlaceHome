@@ -8,7 +8,7 @@ use placenet_home::services::mqtt_brokerage::provision_broker_cert;
 use placenet_home::services::mqtt_client::manager::{register_onto as register_mqtt_client, start_mqtt_client};
 use placenet_home::services::mqtt_client::{self, MqttMessageReceiver};
 use placenet_home::services::mqtt_client::provision_node_identity;
-use placenet_home::infra::ca::manager::register as register_ca;
+use placenet_home::infra::ca::CaService;
 use placenet_home::services::local_gateway::manager::{register_onto as register_gateway, start_gateway};
 use placenet_home::services::local_gateway::handshake::build_brokerage_info;
 use placenet_home::services::cloud_gateway::{connect_to_gateway, messages::GatewayMessage};
@@ -34,7 +34,7 @@ async fn initialize(config: Config) -> AppContext {
     // ── Initialise Certificate Authority ─────────────────────────────
     let ca_db_url = std::env::var("CA_DATABASE_URL")
         .unwrap_or_else(|_| "sqlite://placenet_ca.db".to_string());
-    let ca_service = match register_ca(&ca_db_url).await {
+    let ca_service = match CaService::register(&ca_db_url).await {
         Ok(ca) => ca,
         Err(e) => {
             tracing::error!("Failed to initialise CA: {}", e);
