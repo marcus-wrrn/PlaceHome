@@ -16,6 +16,8 @@ fn make_config_in(dir: &std::path::Path, tls_enabled: bool) -> MqttBrokerageConf
         cafile: dir.join("ca.crt"),
         certfile: dir.join("broker.crt"),
         keyfile: dir.join("broker.key"),
+        san_ips: vec![],
+        san_hostnames: vec![],
     }
 }
 
@@ -99,6 +101,8 @@ async fn write_config_invalid_parent_fails() {
         cafile: PathBuf::from("ca.crt"),
         certfile: PathBuf::from("broker.crt"),
         keyfile: PathBuf::from("broker.key"),
+        san_ips: vec![],
+        san_hostnames: vec![],
     };
 
     // A bare filename has parent "" which create_dir_all("") may succeed on some systems.

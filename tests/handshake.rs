@@ -15,6 +15,8 @@ fn make_config(tls_enabled: bool) -> MqttBrokerageConfig {
         cafile: PathBuf::from("/tmp/test/ca.crt"),
         certfile: PathBuf::from("/tmp/test/broker.crt"),
         keyfile: PathBuf::from("/tmp/test/broker.key"),
+        san_ips: vec![],
+        san_hostnames: vec![],
     }
 }
 

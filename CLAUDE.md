@@ -31,18 +31,21 @@ placenet-home/
     ├── infra/
     │   ├── mod.rs
     │   └── ca/
-    │       ├── mod.rs           ← CaService (sign_csr, get_cert, revoke, ca_cert_pem)
+    │       ├── mod.rs           ← re-exports CaService, DeviceCertRecord
+    │       ├── ca_service.rs    ← CaService, DeviceCertRecord (sign_csr, get_cert, revoke, ca_cert_pem)
     │       ├── manager.rs       ← register() — creates CaService, runs init()
     │       └── operations.rs    ← load_or_generate_ca, sign_csr (pure crypto logic)
     ├── services/
     │   ├── mod.rs               ← ServiceId enum (Gateway, Mosquitto, MqttClient, CloudGateway)
     │   ├── capabilities.rs      ← detect_capabilities() — checks for system binaries
     │   ├── cloud_gateway/
-    │   │   ├── mod.rs           ← CloudGatewayService, CloudGatewayHandle, ManagedService impl
+    │   │   ├── mod.rs           ← re-exports CloudGatewayService, CloudGatewayHandle, connect_to_gateway
+    │   │   ├── cloud_gateway_service.rs ← CloudGatewayService, CloudGatewayHandle, ManagedService impl
     │   │   ├── manager.rs       ← register_onto(), start_cloud_gateway()
     │   │   └── messages.rs      ← GatewayMessage enum (Register, Connect, ConnectRequest, Relay, Ack)
     │   ├── local_gateway/
-    │   │   ├── mod.rs           ← GatewayService, AppState, ManagedService impl
+    │   │   ├── mod.rs           ← re-exports GatewayService; brings AppState, BoxError, ProxyBody, constants into scope
+    │   │   ├── gateway_service.rs ← GatewayService, AppState, ManagedService impl
     │   │   ├── manager.rs       ← register_onto(), start_gateway()
     │   │   ├── tls.rs           ← build_tls_config() — rustls ServerConfig from CaService
     │   │   ├── handshake.rs     ← DeviceInfo, MqttBrokerageInfo, EnrichedRegistrationMessage, build_brokerage_info()
@@ -52,10 +55,12 @@ placenet-home/
     │   │   ├── requests.rs      ← DeviceInitRequest struct + process_request() — parses version, broker_host, device from Request
     │   │   └── response.rs      ← text_response(), json_response() helpers
     │   ├── mqtt_brokerage/
-    │   │   ├── mod.rs           ← MosquittoBrokerageService impl (spawns mosquitto process)
+    │   │   ├── mod.rs           ← re-exports MosquittoBrokerageService, MqttBrokerageHandle, provision_broker_cert
+    │   │   ├── mosquitto_brokerage_service.rs ← MosquittoBrokerageService, MqttBrokerageHandle (spawns mosquitto process)
     │   │   └── registration.rs  ← register_onto(), start_mosquitto_brokerage()
     │   ├── mqtt_client/
-    │   │   ├── mod.rs           ← MqttClientService, MqttClientHandle, MqttMessage, required_subscriptions()
+    │   │   ├── mod.rs           ← re-exports MqttClientService, MqttClientHandle, MqttMessage, required_subscriptions, etc.
+    │   │   ├── mqtt_client_service.rs ← MqttClientService, MqttClientHandle, MqttMessage, required_subscriptions()
     │   │   └── manager.rs       ← register_onto(), start_mqtt_client(), MqttHandles
     │   └── peer/
     │       └── mod.rs           ← send_message() — plain HTTP POST to peer placenet-home node
