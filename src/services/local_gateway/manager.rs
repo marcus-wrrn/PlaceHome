@@ -2,6 +2,7 @@ use tracing::{error, info};
 
 use crate::config::HttpConfig;
 use crate::infra::ca::CaService;
+use crate::services::mqtt_brokerage::MqttBrokerageHandle;
 use crate::supervisor::{Supervisor, SupervisorHandle};
 use crate::services::ServiceId;
 use super::GatewayService;
@@ -12,9 +13,10 @@ pub fn register_onto(
     supervisor: &mut Supervisor,
     config: HttpConfig,
     brokerage_info: MqttBrokerageInfo,
+    brokerage: Option<MqttBrokerageHandle>,
     ca: CaService,
 ) {
-    let service = GatewayService::new(config, ca, brokerage_info);
+    let service = GatewayService::new(config, ca, brokerage_info, brokerage);
     supervisor.register(ServiceId::Gateway, Box::new(service), true);
 }
 

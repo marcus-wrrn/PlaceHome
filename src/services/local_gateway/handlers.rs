@@ -40,6 +40,13 @@ pub(super) async fn handle_device_init(state: &AppState, req: Request<Incoming>)
             return text_response(500, "Failed to sign device certificate");
         }
     };
+    // add PEM to the brokerage for authentication
+    if let Some(brokerage_handle) = &state.brokerage {
+        if let Err(e) = brokerage_handle.register_cert_identity(&device.mdns.hostname, &cert_pem).await {
+            error!("Failed to register device MQTT identity: {}", e);
+            return text_response(500, "Failed to register device MQTT identity");
+        }
+    }
 
     let mut brokerage = state.brokerage_info.clone();
     brokerage.address = request.broker_host;

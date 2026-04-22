@@ -5,17 +5,17 @@ use tracing::{info, warn, error};
 use crate::config::MqttBrokerageConfig;
 use crate::supervisor::{Supervisor, SupervisorHandle};
 use crate::services::{ServiceCapabilities, ServiceId};
-use super::MosquittoBrokerageService;
+use super::{MosquittoBrokerageService, MqttBrokerageHandle};
 
 /// Build and register `MosquittoBrokerageService` onto the supervisor.
 ///
-/// Returns whether mosquitto is available, so the caller can conditionally
-/// start the broker and dependent services.
+/// Returns whether mosquitto is available and, when it is, a handle for runtime
+/// provisioning (e.g. registering device cert identities during the handshake).
 pub async fn register_onto(
     supervisor: &mut Supervisor,
     capabilities: &ServiceCapabilities,
     mqtt_config: Arc<RwLock<MqttBrokerageConfig>>,
-) -> bool {
+) -> (bool, Option<MqttBrokerageHandle>) {
     let available = capabilities.is_available("mosquitto");
 
     let service = MosquittoBrokerageService::new(
@@ -24,26 +24,31 @@ pub async fn register_onto(
         Arc::clone(&mqtt_config),
     );
 
+    let handle = if available { Some(service.handle()) } else { None };
+
     if available {
         let config = mqtt_config.read().await;
         if let Err(e) = config.write_config().await {
             error!("Failed to write mosquitto config: {}", e);
         }
 
-        // Create the initial user in the password file before the broker starts.
-        let username = config.username.clone();
-        let password = config.password.clone();
-        drop(config);
+        // In non-TLS mode the broker uses password-file auth — seed the initial admin user.
+        // In TLS mode, cert-based auth is used and no password file is needed.
+        if !config.tls_enabled {
+            let username = config.username.clone();
+            let password = config.password.clone();
+            drop(config);
 
-        if let Err(e) = service.set_password(&username, &password).await {
-            error!("Failed to set MQTT user password: {}", e);
-        } else {
-            info!("MQTT user '{}' configured", username);
+            if let Err(e) = service.set_password(&username, &password).await {
+                error!("Failed to set MQTT user password: {}", e);
+            } else {
+                info!("MQTT user '{}' configured", username);
+            }
         }
     }
 
     supervisor.register(ServiceId::Mosquitto, Box::new(service), available);
-    available
+    (available, handle)
 }
 
 /// Start the Mosquitto broker via the supervisor.

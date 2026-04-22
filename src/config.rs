@@ -90,7 +90,7 @@ impl MqttBrokerageConfig {
         let password = std::env::var("MQTT_PASSWORD")
             .unwrap_or_else(|_| "changeme".to_string());
         let tls_enabled = std::env::var("MQTT_TLS_ENABLED")
-            .unwrap_or_else(|_| "false".to_string())
+            .unwrap_or_else(|_| "true".to_string())
             .trim()
             .eq_ignore_ascii_case("true");
         let cafile = config_dir.join(

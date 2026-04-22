@@ -17,6 +17,7 @@ use tracing::{info, warn};
 
 use crate::config::HttpConfig;
 use crate::infra::ca::CaService;
+use crate::services::mqtt_brokerage::MqttBrokerageHandle;
 use crate::supervisor::ManagedService;
 use handshake::MqttBrokerageInfo;
 
@@ -30,6 +31,7 @@ type ProxyBody = BoxBody<Bytes, hyper::Error>;
 struct AppState {
     ca: CaService,
     brokerage_info: MqttBrokerageInfo,
+    brokerage: Option<MqttBrokerageHandle>,
     upstream_port: u16,
 }
 
@@ -37,12 +39,18 @@ pub struct GatewayService {
     config: HttpConfig,
     ca: CaService,
     brokerage_info: MqttBrokerageInfo,
+    brokerage: Option<MqttBrokerageHandle>,
     shutdown_tx: Option<oneshot::Sender<()>>,
 }
 
 impl GatewayService {
-    pub fn new(config: HttpConfig, ca: CaService, brokerage_info: MqttBrokerageInfo) -> Self {
-        Self { config, ca, brokerage_info, shutdown_tx: None }
+    pub fn new(
+        config: HttpConfig,
+        ca: CaService,
+        brokerage_info: MqttBrokerageInfo,
+        brokerage: Option<MqttBrokerageHandle>,
+    ) -> Self {
+        Self { config, ca, brokerage_info, brokerage, shutdown_tx: None }
     }
 }
 
@@ -57,6 +65,7 @@ impl ManagedService for GatewayService {
         let state = AppState {
             ca: self.ca.clone(),
             brokerage_info: self.brokerage_info.clone(),
+            brokerage: self.brokerage.clone(),
             upstream_port: self.config.upstream_port,
         };
 

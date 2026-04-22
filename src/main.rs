@@ -127,7 +127,7 @@ async fn main() {
         }
     };
 
-    // ── Register gateway service ─────────────────────────────────────
+    // ── Build gateway brokerage info ─────────────────────────────────
     let ca_cert_pem = match ca_service.ca_cert_pem().await {
         Ok(pem) => pem,
         Err(e) => {
@@ -136,7 +136,6 @@ async fn main() {
         }
     };
     let brokerage_info = build_brokerage_info(&config.mqtt_brokerage, ca_cert_pem);
-    register_gateway(&mut supervisor, config.http, brokerage_info, ca_service.clone());
 
     // ── Provision broker TLS cert ────────────────────────────────────
     if config.mqtt_brokerage.tls_enabled {
@@ -148,7 +147,10 @@ async fn main() {
 
     // ── Register Mosquitto broker ────────────────────────────────────
     let mqtt_broker_config = Arc::new(RwLock::new(config.mqtt_brokerage));
-    let broker_available = register_mqtt_broker(&mut supervisor, &capabilities, Arc::clone(&mqtt_broker_config)).await;
+    let (broker_available, brokerage_handle) = register_mqtt_broker(&mut supervisor, &capabilities, Arc::clone(&mqtt_broker_config)).await;
+
+    // ── Register gateway service ─────────────────────────────────────
+    register_gateway(&mut supervisor, config.http, brokerage_info, brokerage_handle, ca_service.clone());
 
     // ── Provision node identity for MQTT mutual TLS ──────────────────
     if config.mqtt_client.tls_enabled {

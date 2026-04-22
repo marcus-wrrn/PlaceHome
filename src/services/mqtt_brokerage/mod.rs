@@ -10,6 +10,32 @@ use tracing::{info, error};
 use crate::config::MqttBrokerageConfig;
 use crate::supervisor::ManagedService;
 
+/// A cloneable handle for interacting with the MQTT brokerage at runtime.
+#[derive(Clone)]
+pub struct MqttBrokerageHandle {
+    config: Arc<RwLock<MqttBrokerageConfig>>,
+}
+
+impl MqttBrokerageHandle {
+    /// Write the signed device certificate to `{certs_dir}/{hostname}.crt` to record the
+    /// device's MQTT identity. Mosquitto with `require_certificate true` accepts any CA-signed
+    /// cert; this file is a local record used for future dynamic-security provisioning.
+    pub async fn register_cert_identity(&self, hostname: &str, cert_pem: &str) -> Result<(), String> {
+        let certs_dir = {
+            let config = self.config.read().await;
+            config.cafile
+                .parent()
+                .ok_or_else(|| "cafile has no parent directory".to_string())?
+                .to_path_buf()
+        };
+        let cert_path = certs_dir.join(format!("{}.crt", hostname));
+        tokio::fs::write(&cert_path, cert_pem).await
+            .map_err(|e| format!("Failed to write device cert '{}': {}", cert_path.display(), e))?;
+        info!(hostname, cert_path = %cert_path.display(), "Device MQTT cert identity registered");
+        Ok(())
+    }
+}
+
 /// Manages a Mosquitto MQTT broker child process
 pub struct MosquittoBrokerageService {
     binary_path: String,
@@ -30,6 +56,10 @@ impl MosquittoBrokerageService {
             config,
             child: None,
         }
+    }
+
+    pub fn handle(&self) -> MqttBrokerageHandle {
+        MqttBrokerageHandle { config: Arc::clone(&self.config) }
     }
 
     /// Add or update a user's password using mosquitto_passwd
