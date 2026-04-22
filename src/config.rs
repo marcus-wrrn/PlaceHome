@@ -71,6 +71,12 @@ pub struct MqttBrokerageConfig {
     pub certfile: PathBuf,
     /// Path to the broker's TLS private key.
     pub keyfile: PathBuf,
+    /// Explicit IP SANs for the broker TLS cert. If empty, all non-loopback
+    /// local IPs are auto-detected at startup.
+    pub san_ips: Vec<std::net::IpAddr>,
+    /// Additional DNS hostname SANs for the broker TLS cert. "localhost" is
+    /// always included regardless of this list.
+    pub san_hostnames: Vec<String>,
 }
 
 impl MqttBrokerageConfig {
@@ -102,6 +108,17 @@ impl MqttBrokerageConfig {
         let keyfile = config_dir.join(
             std::env::var("MQTT_KEYFILE").unwrap_or_else(|_| "certs/broker.key".to_string()),
         );
+        let san_ips: Vec<std::net::IpAddr> = std::env::var("BROKER_SAN_IPS")
+            .unwrap_or_default()
+            .split(',')
+            .filter_map(|s| s.trim().parse().ok())
+            .collect();
+        let san_hostnames: Vec<String> = std::env::var("BROKER_SAN_HOSTNAMES")
+            .unwrap_or_default()
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty() && s != "localhost")
+            .collect();
         let config_file = config_dir.join("mosquitto.conf");
         let password_file = config_dir.join("passwd");
         Self {
@@ -116,6 +133,8 @@ impl MqttBrokerageConfig {
             cafile,
             certfile,
             keyfile,
+            san_ips,
+            san_hostnames,
         }
     }
 

@@ -69,15 +69,21 @@ async fn provision_broker_cert(ca: &CaService, cfg: &MqttBrokerageConfig) -> Res
     tokio::fs::write(&cfg.cafile, &ca_cert_pem).await
         .map_err(|e| format!("Failed to write broker CA cert: {e}"))?;
 
-    let local_ips = get_local_ips();
+    let san_ips: Vec<std::net::IpAddr> = if cfg.san_ips.is_empty() {
+        get_local_ips()
+    } else {
+        cfg.san_ips.clone()
+    };
+    let mut san_hostnames: Vec<&str> = vec!["localhost"];
+    san_hostnames.extend(cfg.san_hostnames.iter().map(|s| s.as_str()));
     info!(
-        san_ips = ?local_ips,
-        san_dns = ?["localhost"],
+        san_ips = ?san_ips,
+        san_dns = ?san_hostnames,
         cafile = %cfg.cafile.display(),
         certfile = %cfg.certfile.display(),
         "Provisioning broker TLS cert",
     );
-    let (cert_pem, key_pem) = ca.generate_broker_cert(&local_ips, &["localhost"]).await?;
+    let (cert_pem, key_pem) = ca.generate_broker_cert(&san_ips, &san_hostnames).await?;
     debug!(broker_cert_pem = %cert_pem, "Broker cert PEM");
     tokio::fs::write(&cfg.certfile, &cert_pem).await
         .map_err(|e| format!("Failed to write broker cert: {e}"))?;
