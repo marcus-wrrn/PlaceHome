@@ -9,7 +9,8 @@ use super::response::text_response;
 use super::{ProxyBody, BODY_LIMIT, SUPPORTED_VERSION};
 
 pub(super) struct DeviceInitRequest {
-    pub(super) version: String,
+    // TODO: use version checking in later iterations
+    pub(super) _version: String,
     pub(super) broker_host: String,
     pub(super) device: DeviceInfo,
 }
@@ -55,7 +56,7 @@ impl DeviceInitRequest {
             }
         };
 
-        Ok(Self { version, broker_host, device })
+        Ok(Self { _version: version, broker_host, device })
     }
 }
 
