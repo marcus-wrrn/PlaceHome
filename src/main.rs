@@ -1,7 +1,7 @@
 use rustls;
 use tracing::info;
 use placenet_home::config::Config;
-use placenet_home::app::AppContext;
+use placenet_home::app::App;
 
 #[tokio::main]
 async fn main() {
@@ -12,7 +12,7 @@ async fn main() {
     dotenvy::dotenv().ok();
 
     let config = Config::from_env();
-    let ctx = AppContext::initialize(config).await;
+    let ctx = App::initialize(config).await;
 
     tokio::spawn(ctx.run_beacon_message_loop());
 

@@ -15,7 +15,7 @@ use crate::services::cloud_gateway::{connect_to_gateway, messages::GatewayMessag
 use crate::services;
 use crate::supervisor::{Supervisor, SupervisorHandle};
 
-pub struct AppContext {
+pub struct App {
     /// Kept alive to drive the supervisor task until shutdown.
     _supervisor_handle: SupervisorHandle,
     inbound_rx: MqttMessageReceiver,
@@ -23,7 +23,7 @@ pub struct AppContext {
     own_gateway_url: Option<String>,
 }
 
-impl AppContext {
+impl App {
     pub async fn initialize(config: Config) -> Self {
         // ── Service detection ────────────────────────────────────────────
         let required_binaries = ["mosquitto", "mosquitto_passwd"];
