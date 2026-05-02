@@ -48,12 +48,28 @@ pub(super) async fn handle_device_init(state: &AppState, req: Request<Incoming>)
         }
     }
 
+    let beacon_id = uuid::Uuid::new_v4().to_string();
+    let broadcast_topic = format!("{}/broadcast", beacon_id);
+
+    if let Some(tx) = &state.beacon_topic_tx {
+        if let Err(e) = tx.try_send(broadcast_topic.clone()) {
+            tracing::warn!(beacon_id, "Failed to register beacon broadcast topic: {}", e);
+        }
+    }
+
     let mut brokerage = state.brokerage_info.clone();
     brokerage.address = request.broker_host;
 
-    let resp = serde_json::json!({ "cert_pem": cert_pem, "brokerage": brokerage });
+    let resp = serde_json::json!({
+        "cert_pem": cert_pem,
+        "brokerage": brokerage,
+        "beacon_id": beacon_id,
+        "broadcast_topic": broadcast_topic,
+    });
     debug!(
         mdns_hostname = %device.mdns.hostname,
+        beacon_id,
+        broadcast_topic,
         broker_address = %brokerage.address,
         broker_port = brokerage.port,
         cert_pem = %cert_pem,

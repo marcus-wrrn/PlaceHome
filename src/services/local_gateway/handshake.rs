@@ -53,9 +53,7 @@ pub fn build_brokerage_info(config: &MqttBrokerageConfig, ca_cert_pem: String) -
     MqttBrokerageInfo {
         address: "localhost".to_string(),
         port,
-        topics: vec![
-            MqttTopicConfig { topic: "placenet/test".to_string(), qos: 1 },
-        ],
+        topics: vec![],
         ca_cert_pem,
     }
 }

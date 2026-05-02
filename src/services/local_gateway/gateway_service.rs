@@ -1,8 +1,9 @@
 use async_trait::async_trait;
 use http_body_util::combinators::BoxBody;
 use hyper::body::Bytes;
+use std::net::SocketAddr;
 use tokio::net::TcpListener;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 use tokio_rustls::TlsAcceptor;
 use tracing::{info, warn};
 
@@ -24,6 +25,8 @@ pub(super) struct AppState {
     pub(super) brokerage_info: MqttBrokerageInfo,
     pub(super) brokerage: Option<MqttBrokerageHandle>,
     pub(super) upstream_port: u16,
+    /// Sends newly assigned beacon broadcast topics to the app for subscription and broadcasting.
+    pub(super) beacon_topic_tx: Option<mpsc::Sender<String>>,
 }
 
 pub struct GatewayService {
@@ -31,7 +34,15 @@ pub struct GatewayService {
     ca: CaService,
     brokerage_info: MqttBrokerageInfo,
     brokerage: Option<MqttBrokerageHandle>,
+    beacon_topic_tx: Option<mpsc::Sender<String>>,
     shutdown_tx: Option<oneshot::Sender<()>>,
+}
+
+pub(super) struct BoundGateway {
+    pub(super) state: AppState,
+    pub(super) listener: TcpListener,
+    pub(super) local_addr: SocketAddr,
+    pub(super) shutdown_rx: oneshot::Receiver<()>,
 }
 
 impl GatewayService {
@@ -40,8 +51,30 @@ impl GatewayService {
         ca: CaService,
         brokerage_info: MqttBrokerageInfo,
         brokerage: Option<MqttBrokerageHandle>,
+        beacon_topic_tx: Option<mpsc::Sender<String>>,
     ) -> Self {
-        Self { config, ca, brokerage_info, brokerage, shutdown_tx: None }
+        Self { config, ca, brokerage_info, brokerage, beacon_topic_tx, shutdown_tx: None }
+    }
+
+    async fn initialize(&self) -> Result<(BoundGateway, oneshot::Sender<()>), String> {
+        let addr = format!("{}:{}", self.config.host, self.config.port);
+        let state = AppState {
+            ca: self.ca.clone(),
+            brokerage_info: self.brokerage_info.clone(),
+            brokerage: self.brokerage.clone(),
+            upstream_port: self.config.upstream_port,
+            beacon_topic_tx: self.beacon_topic_tx.clone(),
+        };
+
+        let listener = TcpListener::bind(&addr).await
+            .map_err(|e| format!("Failed to bind listener on {}: {}", addr, e))?;
+
+        let local_addr = listener.local_addr()
+            .map_err(|e| format!("Failed to get local address: {}", e))?;
+
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+
+        Ok((BoundGateway { state, listener, local_addr, shutdown_rx }, shutdown_tx))
     }
 }
 
@@ -51,22 +84,8 @@ impl ManagedService for GatewayService {
         if self.shutdown_tx.is_some() {
             return Err("GatewayService is already running".to_string());
         }
-
-        let addr = format!("{}:{}", self.config.host, self.config.port);
-        let state = AppState {
-            ca: self.ca.clone(),
-            brokerage_info: self.brokerage_info.clone(),
-            brokerage: self.brokerage.clone(),
-            upstream_port: self.config.upstream_port,
-        };
-
-        let listener = TcpListener::bind(&addr).await
-            .map_err(|e| format!("Failed to bind listener on {}: {}", addr, e))?;
-
-        let local_addr = listener.local_addr()
-            .map_err(|e| format!("Failed to get local address: {}", e))?;
-
-        let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
+        
+        let (mut gateway, shutdown_tx) = self.initialize().await?;
         self.shutdown_tx = Some(shutdown_tx);
 
         if self.config.tls_enabled {
@@ -74,34 +93,34 @@ impl ManagedService for GatewayService {
             let tls_acceptor = TlsAcceptor::from(tls_config);
 
             tokio::spawn(async move {
-                info!("HTTPS service listening on {} → upstream :{}", local_addr, state.upstream_port);
+                info!("HTTPS service listening on {} → upstream :{}", gateway.local_addr, gateway.state.upstream_port);
 
                 loop {
                     let (tcp_stream, peer_addr) = tokio::select! {
-                        result = listener.accept() => match result {
+                        result = gateway.listener.accept() => match result {
                             Ok(pair) => pair,
                             Err(e) => { warn!("TCP accept error: {}", e); continue; }
                         },
-                        _ = &mut shutdown_rx => { info!("HTTPS service shutting down"); break; }
+                        _ = &mut gateway.shutdown_rx => { info!("HTTPS service shutting down"); break; }
                     };
 
-                    tokio::spawn(super::proxy::serve_tls_connection(tcp_stream, tls_acceptor.clone(), state.clone(), peer_addr));
+                    tokio::spawn(super::proxy::serve_tls_connection(tcp_stream, tls_acceptor.clone(), gateway.state.clone(), peer_addr));
                 }
             });
         } else {
             tokio::spawn(async move {
-                info!("HTTP service listening on {} → upstream :{} (TLS disabled)", local_addr, state.upstream_port);
+                info!("HTTP service listening on {} → upstream :{} (TLS disabled)", gateway.local_addr, gateway.state.upstream_port);
 
                 loop {
                     let (tcp_stream, peer_addr) = tokio::select! {
-                        result = listener.accept() => match result {
+                        result = gateway.listener.accept() => match result {
                             Ok(pair) => pair,
                             Err(e) => { warn!("TCP accept error: {}", e); continue; }
                         },
-                        _ = &mut shutdown_rx => { info!("HTTP service shutting down"); break; }
+                        _ = &mut gateway.shutdown_rx => { info!("HTTP service shutting down"); break; }
                     };
 
-                    tokio::spawn(super::proxy::serve_connection(tcp_stream, state.clone(), peer_addr));
+                    tokio::spawn(super::proxy::serve_connection(tcp_stream, gateway.state.clone(), peer_addr));
                 }
             });
         }

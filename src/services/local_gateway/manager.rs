@@ -1,3 +1,4 @@
+use tokio::sync::mpsc;
 use tracing::{error, info};
 
 use crate::config::HttpConfig;
@@ -15,8 +16,9 @@ pub fn register_onto(
     brokerage_info: MqttBrokerageInfo,
     brokerage: Option<MqttBrokerageHandle>,
     ca: CaService,
+    beacon_topic_tx: Option<mpsc::Sender<String>>,
 ) {
-    let service = GatewayService::new(config, ca, brokerage_info, brokerage);
+    let service = GatewayService::new(config, ca, brokerage_info, brokerage, beacon_topic_tx);
     supervisor.register(ServiceId::Gateway, Box::new(service), true);
 }
 

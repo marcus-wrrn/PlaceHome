@@ -1,11 +1,12 @@
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
 use tracing::info;
 use crate::config::Config;
 use crate::services::mqtt_brokerage::manager::{register_onto as register_mqtt_broker, start_mosquitto_brokerage};
 use crate::services::mqtt_brokerage::provision_broker_cert;
 use crate::services::mqtt_client::manager::{register_onto as register_mqtt_client, start_mqtt_client};
-use crate::services::mqtt_client::{self, MqttMessageReceiver};
+use crate::services::mqtt_client::{self, MqttClientHandle, MqttMessageReceiver};
+use rumqttc::QoS;
 use crate::services::mqtt_client::provision_node_identity;
 use crate::infra::ca::CaService;
 use crate::services::local_gateway::manager::{register_onto as register_gateway, start_gateway};
@@ -19,8 +20,11 @@ pub struct App {
     /// Kept alive to drive the supervisor task until shutdown.
     _supervisor_handle: SupervisorHandle,
     inbound_rx: MqttMessageReceiver,
+    mqtt_handle: MqttClientHandle,
     server_url: String,
     own_gateway_url: Option<String>,
+    beacon_topic_rx: mpsc::Receiver<String>,
+    broadcast_topics: Arc<RwLock<Vec<String>>>,
 }
 
 impl App {
@@ -65,7 +69,9 @@ impl App {
             register_mqtt_broker(&mut supervisor, &capabilities, Arc::clone(&mqtt_broker_config)).await;
 
         // ── Register gateway service ─────────────────────────────────────
-        register_gateway(&mut supervisor, config.http, brokerage_info, brokerage_handle, ca_service.clone());
+        let (beacon_topic_tx, beacon_topic_rx) = mpsc::channel::<String>(64);
+        let broadcast_topics: Arc<RwLock<Vec<String>>> = Arc::new(RwLock::new(Vec::new()));
+        register_gateway(&mut supervisor, config.http, brokerage_info, brokerage_handle, ca_service.clone(), Some(beacon_topic_tx));
 
         // ── Provision node identity for MQTT mutual TLS ──────────────────
         if config.mqtt_client.tls_enabled {
@@ -114,8 +120,43 @@ impl App {
         Self {
             _supervisor_handle: supervisor_handle,
             inbound_rx,
+            mqtt_handle,
             server_url: config.gateway_registration.server_url,
             own_gateway_url: config.gateway_registration.gateway_url,
+            beacon_topic_rx,
+            broadcast_topics,
+        }
+    }
+
+    pub async fn run_broadcast_loop(&self) {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(300));
+        loop {
+            interval.tick().await;
+            let payload = serde_json::json!({ "server_url": self.server_url });
+            let payload_str = payload.to_string();
+
+            if let Err(e) = self
+                .mqtt_handle
+                .publish("placenet/broadcast", QoS::AtLeastOnce, payload_str.clone())
+                .await
+            {
+                tracing::error!("Failed to publish broadcast: {}", e);
+            } else {
+                info!("Broadcast published to placenet/broadcast");
+            }
+
+            let topics = self.broadcast_topics.read().await;
+            for topic in topics.iter() {
+                if let Err(e) = self
+                    .mqtt_handle
+                    .publish(topic, QoS::AtLeastOnce, payload_str.clone())
+                    .await
+                {
+                    tracing::error!(topic, "Failed to publish beacon broadcast: {}", e);
+                } else {
+                    info!(topic, "Broadcast published to beacon topic");
+                }
+            }
         }
     }
 
@@ -130,7 +171,22 @@ impl App {
         // Keep (handle, shutdown_tx) pairs alive so dynamic connections persist.
         let mut dynamic_connections = Vec::new();
 
-        while let Some(msg) = self.inbound_rx.recv().await {
+        loop {
+            let msg = tokio::select! {
+                Some(topic) = self.beacon_topic_rx.recv() => {
+                    if let Err(e) = self.mqtt_handle.subscribe(&topic, QoS::AtLeastOnce).await {
+                        tracing::error!(topic, "Failed to subscribe to beacon broadcast topic: {}", e);
+                    } else {
+                        info!(topic, "Subscribed to beacon broadcast topic");
+                        self.broadcast_topics.write().await.push(topic);
+                    }
+                    continue;
+                }
+                msg = self.inbound_rx.recv() => match msg {
+                    Some(m) => m,
+                    None => break,
+                }
+            };
             info!(topic = %msg.topic, "Received MQTT message");
 
             // Parse the raw beacon payload, falling back to a string value if it
