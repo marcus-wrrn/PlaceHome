@@ -24,9 +24,10 @@ placenet-home/
 │   ├── handshake.rs             ← MqttBrokerageInfo / EnrichedRegistrationMessage tests
 │   └── supervisor.rs            ← Supervisor lifecycle tests
 └── src/
-    ├── main.rs                  ← Startup: wires all services, runs event loop
+    ├── main.rs                  ← Startup: installs crypto provider, loads config, spawns AppContext
     ├── lib.rs                   ← Re-exports all public modules
     ├── config.rs                ← All Config structs (loaded from env)
+    ├── app.rs                   ← AppContext — wires all services in initialize(); run_beacon_message_loop() processes inbound MQTT messages and connects to advertised gateways
     ├── supervisor.rs            ← Supervisor, ManagedService trait, SupervisorHandle
     ├── infra/
     │   ├── mod.rs
