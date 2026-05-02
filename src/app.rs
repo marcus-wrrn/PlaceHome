@@ -135,16 +135,6 @@ impl App {
             let payload = serde_json::json!({ "server_url": self.server_url });
             let payload_str = payload.to_string();
 
-            if let Err(e) = self
-                .mqtt_handle
-                .publish("placenet/broadcast", QoS::AtLeastOnce, payload_str.clone())
-                .await
-            {
-                tracing::error!("Failed to publish broadcast: {}", e);
-            } else {
-                info!("Broadcast published to placenet/broadcast");
-            }
-
             let topics = self.broadcast_topics.read().await;
             for topic in topics.iter() {
                 if let Err(e) = self
