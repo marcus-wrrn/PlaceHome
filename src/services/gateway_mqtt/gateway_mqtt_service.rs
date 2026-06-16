@@ -21,7 +21,8 @@ const OUTBOUND_CAPACITY: usize = 64;
 #[derive(Debug, Clone)]
 pub struct GatewayMqttConfig {
     /// Base URL of the gateway HTTPS API (e.g. `https://gateway.example.com:8443`).
-    pub login_url: String,
+    /// `/api/login` is appended by the login client.
+    pub gateway_url: String,
     pub username: String,
     pub password: String,
     /// Pinned CA for the gateway broker / API. `None` → webpki roots.

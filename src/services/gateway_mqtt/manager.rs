@@ -14,7 +14,7 @@ pub fn register_onto(
     supervisor: &mut Supervisor,
     cfg: &GatewayRegistrationConfig,
 ) -> Option<GatewayMqttHandle> {
-    let login_url = match &cfg.gateway_url {
+    let gateway_url = match &cfg.gateway_url {
         None => {
             warn!("PLACENET_GATEWAY_URL not set — cloud gateway client disabled");
             return None;
@@ -28,7 +28,7 @@ pub fn register_onto(
     }
 
     let config = GatewayMqttConfig {
-        login_url,
+        gateway_url,
         username: cfg.username.clone(),
         password: cfg.password.clone(),
         broker_cafile: cfg.broker_cafile.clone(),

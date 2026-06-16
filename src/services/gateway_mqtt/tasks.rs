@@ -42,7 +42,7 @@ pub fn spawn_connection_task(
                     };
                     let attempt = tokio::select! {
                         _ = &mut shutdown_rx => break 'reconnect,
-                        r = login(&config.login_url, &req, config.broker_cafile.as_deref()) => r,
+                        r = login(&config.gateway_url, &req, config.broker_cafile.as_deref()) => r,
                     };
                     match attempt {
                         Ok(resp) => {
